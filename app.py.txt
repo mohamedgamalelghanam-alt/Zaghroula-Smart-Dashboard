@@ -1,0 +1,60 @@
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+
+st.set_page_config(page_title="داشبورد زغلولة الذكية", layout="wide")
+
+st.title("📊 نظام تحليل مبيعات زغلولة اليومي")
+st.markdown("---")
+
+# 1. رفع الملف
+uploaded_file = st.file_uploader("ارفع ملف مبيعات اليوم (xls)", type=['xls', 'csv'])
+
+if uploaded_file:
+    # 2. وظيفة التنظيف والحسابات (اللي جربناها في كولاب)
+    @st.cache_data # عشان البرنامج يبقى سريع
+    def load_and_clean(file):
+        df = pd.read_csv(file, encoding='cp1256')
+        df_sales = df.dropna(subset=['رقم الفاتورة']).copy()
+        df_sales = df_sales[~df_sales['الصنف'].str.contains('اجمالى|وارد', na=False)]
+        
+        for col in ['الكمية', 'السعر', 'س شراء', 'الكمية المتبقية']:
+            df_sales[col] = pd.to_numeric(df_sales[col].astype(str).str.replace('×', '').str.replace('x', '').str.strip(), errors='coerce')
+        
+        df_sales['س شراء'] = df_sales['س شراء'].fillna(0)
+        df_sales['Total_Sales'] = df_sales['الكمية'] * df_sales['السعر']
+        df_sales['Net_Profit'] = df_sales['Total_Sales'] - df_sales['س شراء']
+        return df_sales
+
+    data = load_and_clean(uploaded_file)
+
+    # 3. عرض المؤشرات الرئيسية (Key Metrics)
+    col1, col2, col3 = st.columns(3)
+    col1.metric("💰 إجمالي المبيعات", f"{data['Total_Sales'].sum():,.2f} ج.م")
+    col2.metric("📈 صافي الأرباح", f"{data['Net_Profit'].sum():,.2f} ج.م")
+    
+    low_stock = data[data['الكمية المتبقية'] <= 5]
+    col3.metric("🚨 أصناف ناقصة", f"{len(low_stock['الصنف'].unique())}")
+
+    # 4. الرسوم البيانية
+    st.markdown("### 🔝 تحليل الأصناف")
+    c1, c2 = st.columns(2)
+    
+    with c1:
+        top_profit = data.groupby('الصنف')['Net_Profit'].sum().sort_values(ascending=False).head(10)
+        fig_profit = px.bar(top_profit, x=top_profit.values, y=top_profit.index, orientation='h', 
+                             title="أعلى 10 أصناف ربحية", labels={'x':'الربح', 'y':'الصنف'})
+        st.plotly_chart(fig_profit, use_container_width=True)
+
+    with c2:
+        top_qty = data.groupby('الصنف')['الكمية'].sum().sort_values(ascending=False).head(10)
+        fig_qty = px.pie(values=top_qty.values, names=top_qty.index, title="توزيع الكميات المباعة")
+        st.plotly_chart(fig_qty, use_container_width=True)
+
+    # 5. جدول النواقص
+    st.markdown("### 🛒 قائمة المشتريات المطلوبة (النواقص)")
+    if not low_stock.empty:
+        st.warning("الأصناف دي قربت تخلص من المحل:")
+        st.dataframe(low_stock[['الصنف', 'الكمية المتبقية']].drop_duplicates(), use_container_width=True)
+    else:
+        st.success("المخزن تمام، مفيش نواقص!")
