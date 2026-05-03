@@ -1,39 +1,101 @@
 import streamlit as st
 import pandas as pd
+import plotly.express as px
 
-st.set_page_config(page_title="📊 Zaghloula Dashboard", layout="wide")
+# 1. إعداد الصفحة بشكل احترافي
+st.set_config_page(page_title="📊 Zaghloula Smart Dashboard", layout="wide")
 
-st.title("📊 Zaghloula Smart Dashboard")
-
-file = st.file_uploader("ارفع ملف المبيعات", type=["xlsx", "xls", "csv"])
-
-if file:
+# 2. دالة معالجة البيانات وتحليلها
+@st.cache_data
+def analyze_data(file):
     try:
-        # 1. قراءة الملف
-        try:
-            df = pd.read_excel(file)
-        except:
-            df = pd.read_csv(file, encoding='cp1256')
+        df = pd.read_excel(file)
+    except:
+        df = pd.read_csv(file, encoding='cp1256')
 
-        # 2. تنظيف أسماء الأعمدة (شيل المسافات)
-        df.columns = [str(c).strip() for c in df.columns]
+    # تنظيف البيانات
+    df.columns = [str(c).strip() for c in df.columns]
+    if 'صنف' in df.columns:
+        df = df.dropna(subset=['صنف'])
+        df = df[~df['صنف'].astype(str).str.contains('بيع|إجمالي|اجمالى', na=False)]
 
-        # 3. تحديد الأعمدة بذكاء (عشان لو الاسم اتغير)
-        # بندور على أي عمود فيه كلمة 'قيمة' أو 'صافي' للبيع
-        val_col = next((c for c in df.columns if 'قيمة' in c or 'صافي' in c), None)
-        # بندور على أي عمود فيه كلمة 'ربح'
-        profit_col = next((c for c in df.columns if 'ربح' in c), None)
-        # بندور على صنف
-        name_col = next((c for c in df.columns if 'صنف' in c), None)
+    # تحويل الأرقام
+    cols = ['كمية', 'قيمة', 'سعر التكلفة', 'الرصيد الحالي', 'إجمالي ربح']
+    for c in cols:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
 
-        if val_col and profit_col:
-            # 4. تحويل الداتا لأرقام (إجباري) وشيل أي نصوص
-            df[val_col] = pd.to_numeric(df[val_col], errors='coerce').fillna(0)
-            df[profit_col] = pd.to_numeric(df[profit_col], errors='coerce').fillna(0)
+    # الحسابات الذكية
+    # إذا كان عمود 'إجمالي ربح' موجود نعتمد عليه، وإلا نحسبه يدوياً
+    if 'إجمالي ربح' in df.columns and df['إجمالي ربح'].sum() != 0:
+        df['Net_Profit'] = df['إجمالي ربح']
+    else:
+        df['Net_Profit'] = df['قيمة'] - (df['كمية'] * df['سعر التكلفة'])
+    
+    df['Total_Sales'] = df['قيمة']
+    
+    return df
 
-            # 5. تنظيف الصفوف (شيل صف "بيع" أو "إجمالي")
-            df = df.dropna(subset=[name_col])
-            df = df[~df[name_col].astype(str).str.contains('بيع|إجمالي|اجمالى', na=False)]
+# 3. الواجهة الرئيسية
+st.title("📊 Zaghloula Smart Dashboard")
+st.markdown("---")
+
+uploaded_file = st.sidebar.file_uploader("ارفع ملف مبيعات السبت أو أي يوم آخر", type=["xlsx", "xls", "csv"])
+
+if uploaded_file:
+    df = analyze_data(uploaded_file)
+    
+    # --- قسم الأرقام الرئيسية (Key Metrics) ---
+    t_sales = df['Total_Sales'].sum()
+    t_profit = df['Net_Profit'].sum()
+    margin = (t_profit / t_sales * 100) if t_sales > 0 else 0
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("💰 إجمالي دخل الدرج", f"{t_sales:,.2f} ج.م")
+    with col2:
+        st.metric("📈 صافي الربح الحقيقي", f"{t_profit:,.2f} ج.م")
+    with col3:
+        st.metric("🎯 متوسط هامش الربح", f"{margin:.1f}%")
+
+    st.markdown("---")
+
+    # --- قسم التحليل الذكي (Insights) ---
+    tab1, tab2, tab3 = st.tabs(["🚀 الأعلى ربحية", "📦 رادار النواقص", "📋 تقرير اليوم"])
+
+    with tab1:
+        st.subheader("الأصناف 'الجوكر' (أعلى 10 أصناف مكسباً)")
+        top_10 = df.groupby('صنف')['Net_Profit'].sum().sort_values(ascending=False).head(10).reset_index()
+        fig = px.bar(top_10, x='Net_Profit', y='صنف', orientation='h', 
+                     color='Net_Profit', color_continuous_scale='Greens',
+                     labels={'Net_Profit': 'صافي الربح', 'صنف': 'اسم الصنف'})
+        st.plotly_chart(fig, use_container_width=True)
+
+    with tab2:
+        st.subheader("⚠️ أصناف محتاجة توريد (الرصيد أقل من 1 كيلو/قطعة)")
+        if 'الرصيد الحالي' in df.columns:
+            low_stock = df[df['الرصيد الحالي'] < 1][['صنف', 'الرصيد الحالي']].sort_values(by='الرصيد الحالي')
+            st.table(low_stock)
+        else:
+            st.info("عمود الرصيد غير متوفر في هذا الملف.")
+
+    with tab3:
+        st.subheader("📝 ملخص أداء اليوم")
+        st.write(f"اليوم تم تسجيل **{len(df)}** عملية بيع.")
+        
+        # تحليل فئات المنتجات (لو الاسم فيه بن، عطارة، إلخ)
+        df['Category'] = df['صنف'].apply(lambda x: 'بن' if 'بن' in str(x) else ('عطارة' if 'عطاره' in str(x) else 'أخرى'))
+        cat_analysis = df.groupby('Category')['Net_Profit'].sum().reset_index()
+        
+        st.write("توزيع الأرباح حسب الفئة:")
+        st.plotly_chart(px.pie(cat_analysis, values='Net_Profit', names='Category', hole=0.4))
+
+    # التوقيع
+    st.markdown("---")
+    st.markdown("<div style='text-align: center; color: gray;'>تطوير المهندس محمد جمال | 01029796096</div>", unsafe_allow_html=True)
+
+else:
+    st.info("يا هندسة ارفع ملف السبت عشان أوريك التحليل اللي عملناه دلوقتى ظهر إزاي!")
 
             # 6. الحسابات النهائية
             total_sales = df[val_col].sum()
