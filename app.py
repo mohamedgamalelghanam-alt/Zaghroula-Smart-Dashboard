@@ -1,39 +1,60 @@
 import streamlit as st
 import pandas as pd
 
-st.write("### تفعيل نظام زغلولة الذكي 🚀")
+st.set_page_config(page_title="📊 Zaghloula Dashboard", layout="wide")
 
-file = st.file_uploader("ارفع الملف هنا")
+st.title("📊 Zaghloula Smart Dashboard")
+
+file = st.file_uploader("ارفع ملف المبيعات", type=["xlsx", "xls", "csv"])
 
 if file:
-    # محاولة قراءة شاملة
     try:
-        df = pd.read_excel(file)
-    except:
-        df = pd.read_csv(file, encoding='cp1256')
-    
-    # تنظيف أسماء الأعمدة من أي فراغات
-    df.columns = [str(c).strip() for c in df.columns]
-    
-    # عرض أسماء الأعمدة اللي لقاها عشان نتأكد
-    st.write("الأعمدة اللي السيستم شافها:", list(df.columns))
-    
-    # تحويل أهم الأعمدة لأرقام
-    target_cols = ['كمية', 'قيمة', 'سعر التكلفة']
-    for c in target_cols:
-        if c in df.columns:
-            df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
-    
-    # الحسبة المباشرة
-    if 'قيمة' in df.columns and 'سعر التكلفة' in df.columns:
-        total_sales = df['قيمة'].sum()
-        # الربح = القيمة - (الكمية * التكلفة)
-        total_profit = (df['قيمة'] - (df['كمية'] * df['سعر التكلفة'])).sum()
-        
-        st.metric("إجمالي المبيعات", f"{total_sales:,.2f}")
-        st.metric("صافي الربح", f"{total_profit:,.2f}")
-        
-        st.write("### عينة من البيانات المرفوعة:")
+        # 1. قراءة الملف
+        try:
+            df = pd.read_excel(file)
+        except:
+            df = pd.read_csv(file, encoding='cp1256')
+
+        # 2. تنظيف أسماء الأعمدة (شيل المسافات)
+        df.columns = [str(c).strip() for c in df.columns]
+
+        # 3. تحديد الأعمدة بذكاء (عشان لو الاسم اتغير)
+        # بندور على أي عمود فيه كلمة 'قيمة' أو 'صافي' للبيع
+        val_col = next((c for c in df.columns if 'قيمة' in c or 'صافي' in c), None)
+        # بندور على أي عمود فيه كلمة 'ربح'
+        profit_col = next((c for c in df.columns if 'ربح' in c), None)
+        # بندور على صنف
+        name_col = next((c for c in df.columns if 'صنف' in c), None)
+
+        if val_col and profit_col:
+            # 4. تحويل الداتا لأرقام (إجباري) وشيل أي نصوص
+            df[val_col] = pd.to_numeric(df[val_col], errors='coerce').fillna(0)
+            df[profit_col] = pd.to_numeric(df[profit_col], errors='coerce').fillna(0)
+
+            # 5. تنظيف الصفوف (شيل صف "بيع" أو "إجمالي")
+            df = df.dropna(subset=[name_col])
+            df = df[~df[name_col].astype(str).str.contains('بيع|إجمالي|اجمالى', na=False)]
+
+            # 6. الحسابات النهائية
+            total_sales = df[val_col].sum()
+            total_profit = df[profit_col].sum()
+
+            # العرض
+            c1, c2 = st.columns(2)
+            c1.metric("💰 إجمالي المبيعات", f"{total_sales:,.2f} ج.م")
+            c2.metric("📈 صافي الأرباح", f"{total_profit:,.2f} ج.م")
+
+            st.write("### مراجعة البيانات المرفوعة:")
+            st.dataframe(df[[name_col, val_col, profit_col]].head(10))
+            
+        else:
+            st.error(f"السيستم مش لاقي الأعمدة المطلوبة. الأعمدة اللي موجودة هي: {list(df.columns)}")
+
+    except Exception as e:
+        st.error(f"حصلت مشكلة وأنا بقرأ الملف: {e}")
+
+st.markdown("---")
+st.markdown("<center>تطوير المهندس محمد جمال | 01029796096</center>", unsafe_allow_html=True)
         st.dataframe(df.head())
     else:
         st.error("السيستم مش لاقي أعمدة (قيمة) أو (سعر التكلفة). تأكد من الملف!")
