@@ -113,7 +113,7 @@ with st.sidebar:
 # ---------------------------------------------------
 # Main App
 # ---------------------------------------------------
-st.title("📊 نظام تحليل مبيعات زغلولة")
+st.title("🛒 Zaghloula Smart Dashboard")
 
 if uploaded_file:
     data, branch = load_data(uploaded_file)
