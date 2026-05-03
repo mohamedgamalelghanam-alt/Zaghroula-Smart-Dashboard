@@ -5,323 +5,121 @@ from docx import Document
 from io import BytesIO
 from datetime import datetime
 
-# ---------------------------------------------------
-# إعداد الصفحة
-# ---------------------------------------------------
-st.set_page_config(
-    page_title="Zaghloula Smart Dashboard",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+# إعدادات الصفحة
+st.set_page_config(page_title="داشبورد زغلولة الذكية", layout="wide", page_icon="📈")
 
-# ---------------------------------------------------
-# CSS
-# ---------------------------------------------------
-st.markdown("""
-<style>
-.main {
-    background-color: #f8f9fa;
-}
-
-.card {
-    padding: 20px;
-    border-radius: 15px;
-    background: white;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-    text-align: center;
-}
-
-.card h2 {
-    color: #2c3e50;
-    font-size: 20px;
-}
-
-.card h1 {
-    color: #27ae60;
-    font-size: 28px;
-}
-</style>
-""", unsafe_allow_html=True)
-
-# ---------------------------------------------------
-# تقرير Word
-# ---------------------------------------------------
-def create_word_report(data, total_sales, total_profit, branch):
+# --- وظيفة إنشاء ملف الوورد (Word) ---
+def create_word_report(data, t_sales, t_profit, branch):
     doc = Document()
-
-    doc.add_heading(f"تقرير مبيعات - {branch}", 0)
-    doc.add_paragraph(
-        f"تاريخ التقرير: {datetime.now().strftime('%Y-%m-%d')}"
-    )
-
-    doc.add_heading("الملخص المالي", level=1)
-    doc.add_paragraph(f"إجمالي المبيعات: {total_sales:,.2f} جنيه")
-    doc.add_paragraph(f"صافي الأرباح: {total_profit:,.2f} جنيه")
-
-    top_products = (
-        data.groupby('الصنف')[['Total_Sales', 'Net_Profit']]
-        .sum()
-        .sort_values(by='Total_Sales', ascending=False)
-        .head(10)
-        .reset_index()
-    )
-
-    doc.add_heading("أفضل الأصناف", level=1)
-
+    doc.add_heading(f'تقرير مبيعات: {branch}', 0)
+    doc.add_paragraph(f'تاريخ التقرير: {datetime.now().strftime("%Y-%m-%d")}')
+    
+    doc.add_heading('الملخص المالي اليومي', level=1)
+    doc.add_paragraph(f'إجمالي المبيعات: {t_sales:,.2f} جنيه')
+    doc.add_paragraph(f'صافي الأرباح: {t_profit:,.2f} جنيه')
+    
+    doc.add_heading('أعلى الأصناف ربحية', level=1)
     table = doc.add_table(rows=1, cols=3)
-    table.style = "Table Grid"
+    table.style = 'Table Grid'
+    hdr_cells = table.rows[0].cells
+    hdr_cells[0].text = 'الصنف'
+    hdr_cells[1].text = 'المبيعات'
+    hdr_cells[2].text = 'صافي الربح'
+    
+    for _, row in data.head(15).iterrows():
+        row_cells = table.add_row().cells
+        row_cells[0].text = str(row['الصنف'])
+        row_cells[1].text = f"{row['Total_Sales']:,.2f}"
+        row_cells[2].text = f"{row['Net_Profit']:,.2f}"
+        
+    target = BytesIO()
+    doc.save(target)
+    return target.getvalue()
 
-    headers = table.rows[0].cells
-    headers[0].text = "الصنف"
-    headers[1].text = "المبيعات"
-    headers[2].text = "الربح"
+# --- واجهة المستخدم ---
+st.title("📊 نظام تحليل مبيعات زغلولة الذكي")
 
-    for _, row in top_products.iterrows():
-        cells = table.add_row().cells
-        cells[0].text = str(row["الصنف"])
-        cells[1].text = f"{row['Total_Sales']:,.2f}"
-        cells[2].text = f"{row['Net_Profit']:,.2f}"
+# --- سكشن دليل الاستخدام (User Guide) ---
+with st.expander("📖 دليل استخدام الداشبورد - اقرأني إذا كنت تحتاج مساعدة"):
+    st.markdown("""
+    ### كيف يعمل النظام؟
+    1. **رفع الملف:** قم برفع ملف الإكسيل المستخرج من نظام المبيعات (بصيغة `xls` أو `csv`).
+    2. **المعالجة الذكية:** يقوم النظام تلقائياً بتنظيف البيانات، وحساب الأرباح بناءً على (سعر البيع - سعر الشراء) مضروباً في الكمية.
+    3. **المؤشرات:** 
+        * **إجمالي المبيعات:** مجموع الفلوس اللي دخلت الدرج.
+        * **صافي الأرباح:** الفائدة الحقيقية بعد خصم تكلفة البضاعة.
+        * **الأصناف الناقصة:** تنبيه للأصناف التي رصيدها أقل من 5 قطع.
+    4. **التقارير:** يمكنك تحميل تقرير Word رسمي لطباعته أو حفظه.
+    """)
 
-    file = BytesIO()
-    doc.save(file)
-    return file.getvalue()
+st.markdown("---")
 
-
-# ---------------------------------------------------
-# قراءة وتنظيف البيانات
-# ---------------------------------------------------
-@st.cache_data
-def load_data(file):
-    try:
-        df = pd.read_csv(file, encoding="cp1256")
-    except:
-        df = pd.read_excel(file)
-
-    df = df.copy()
-
-    branch = (
-        df["المخزن"].dropna().iloc[0]
-        if "المخزن" in df.columns
-        else "الفرع الرئيسي"
-    )
-
-    unwanted_words = [
-        "وارد",
-        "إجمالي وارد",
-        "بيع نقدي",
-        "بيع آجل"
-    ]
-
-    df = df[
-        ~df["الصنف"].astype(str).str.contains(
-            "|".join(unwanted_words),
-            na=False
-        )
-    ]
-
-    df = df.dropna(subset=["الكمية"])
-
-    numeric_cols = [
-        "الكمية",
-        "السعر",
-        "س شراء",
-        "الكمية المتبقية",
-        "القيمة",
-        "ربح"
-    ]
-
-    for col in numeric_cols:
-        if col in df.columns:
-            df[col] = pd.to_numeric(
-                df[col],
-                errors="coerce"
-            ).fillna(0)
-
-    # استخدام القيم الجاهزة من الملف
-    df["Total_Sales"] = df["القيمة"]
-
-    if "ربح" in df.columns:
-        df["Net_Profit"] = df["ربح"]
-    else:
-        df["Net_Profit"] = 0
-
-    return df, branch
-
-
-# ---------------------------------------------------
-# Sidebar
-# ---------------------------------------------------
-with st.sidebar:
-    st.title("🛒 زغلولة")
-    st.markdown("### Smart Sales Dashboard")
-
-    uploaded_file = st.file_uploader(
-        "ارفع ملف المبيعات",
-        type=["csv", "xls", "xlsx"]
-    )
-
-
-# ---------------------------------------------------
-# Main App
-# ---------------------------------------------------
-st.title("📊 نظام تحليل مبيعات زغلولة")
+uploaded_file = st.file_uploader("📥 ارفع ملف مبيعات اليوم", type=['xls', 'csv'])
 
 if uploaded_file:
-    data, branch = load_data(uploaded_file)
+    @st.cache_data
+    def load_and_clean(file):
+        try:
+            df = pd.read_csv(file, encoding='cp1256')
+        except:
+            df = pd.read_excel(file)
+            
+        branch = df['الفرع'].dropna().iloc[0] if 'الفرع' in df.columns else "الفرع الرئيسي"
+        
+        # تنظيف البيانات
+        df_sales = df.dropna(subset=['رقم الفاتورة']).copy()
+        df_sales = df_sales[~df_sales['الصنف'].str.contains('اجمالى|وارد', na=False)]
+        
+        # تحويل الأعمدة لأرقام
+        for col in ['الكمية', 'السعر', 'س شراء', 'الكمية المتبقية']:
+            df_sales[col] = pd.to_numeric(df_sales[col].astype(str).str.replace('×', '').str.replace('x', '').str.strip(), errors='coerce')
+        
+        df_sales['س شراء'] = df_sales['س شراء'].fillna(0)
+        
+        # --- حل مشكلة الربح (الزيتونة هنا) ---
+        df_sales['Total_Sales'] = df_sales['الكمية'] * df_sales['السعر']
+        # الربح = (سعر البيع - سعر الشراء) * الكمية
+        df_sales['Net_Profit'] = (df_sales['السعر'] - df_sales['س شراء']) * df_sales['الكمية']
+        
+        return df_sales, branch
 
-    selected_product = st.selectbox(
-        "فلترة حسب الصنف",
-        ["الكل"] + sorted(list(data["الصنف"].unique()))
-    )
+    data, branch = load_and_clean(uploaded_file)
 
-    if selected_product != "الكل":
-        data = data[data["الصنف"] == selected_product]
+    # عرض المؤشرات
+    st.subheader(f"📍 فرع: {branch}")
+    m1, m2, m3 = st.columns(3)
+    t_sales = data['Total_Sales'].sum()
+    t_profit = data['Net_Profit'].sum()
+    
+    m1.metric("💰 إجمالي المبيعات", f"{t_sales:,.2f} ج.م")
+    m2.metric("📈 صافي الأرباح", f"{t_profit:,.2f} ج.م", delta=f"{((t_profit/t_sales)*100) if t_sales !=0 else 0:.1f}% هامش ربح")
+    
+    low_stock = data[data['الكمية المتبقية'] <= 5].drop_duplicates(subset=['الصنف'])
+    m3.metric("🚨 أصناف قربت تخلص", f"{len(low_stock)}")
 
-    total_sales = data["Total_Sales"].sum()
-    total_profit = data["Net_Profit"].sum()
-
-    low_stock = data[data["الكمية المتبقية"] <= 5]
-
-    best_product = (
-        data.groupby("الصنف")["Net_Profit"]
-        .sum()
-        .idxmax()
-    )
-
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "📊 Dashboard",
-        "📦 Inventory",
-        "📝 Reports",
-        "📘 دليل الاستخدام"
-    ])
-
-    # ---------------- Dashboard
-    with tab1:
-        st.subheader(f"📍 الفرع: {branch}")
-
-        c1, c2, c3 = st.columns(3)
-
-        with c1:
-            st.markdown(f"""
-            <div class="card">
-            <h2>إجمالي المبيعات</h2>
-            <h1>{total_sales:,.2f} ج.م</h1>
-            </div>
-            """, unsafe_allow_html=True)
-
-        with c2:
-            st.markdown(f"""
-            <div class="card">
-            <h2>صافي الأرباح</h2>
-            <h1>{total_profit:,.2f} ج.م</h1>
-            </div>
-            """, unsafe_allow_html=True)
-
-        with c3:
-            st.markdown(f"""
-            <div class="card">
-            <h2>الأصناف الناقصة</h2>
-            <h1>{len(low_stock)}</h1>
-            </div>
-            """, unsafe_allow_html=True)
-
-        st.success(f"🔥 أكثر صنف حقق ربح: {best_product}")
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-            top_profit = (
-                data.groupby("الصنف")["Net_Profit"]
-                .sum()
-                .sort_values(ascending=False)
-                .head(10)
-                .reset_index()
-            )
-
-            fig1 = px.bar(
-                top_profit,
-                x="Net_Profit",
-                y="الصنف",
-                orientation="h",
-                title="أعلى 10 أصناف ربحية"
-            )
-            st.plotly_chart(fig1, use_container_width=True)
-
-        with col2:
-            fig2 = px.treemap(
-                data,
-                path=["الصنف"],
-                values="Total_Sales",
-                title="خريطة المبيعات"
-            )
-            st.plotly_chart(fig2, use_container_width=True)
-
-    # ---------------- Inventory
-    with tab2:
-        st.subheader("📦 إدارة المخزون")
-
-        if len(low_stock) > 0:
-            st.warning("يوجد أصناف تحتاج إعادة طلب")
-
-        st.dataframe(
-            low_stock[["الصنف", "الكمية المتبقية"]].drop_duplicates(),
-            use_container_width=True
-        )
-
-    # ---------------- Reports
-    with tab3:
-        st.subheader("📝 التقارير")
-
-        word_file = create_word_report(
-            data,
-            total_sales,
-            total_profit,
-            branch
-        )
-
+    # التحليلات البيانية
+    st.markdown("### 📊 تحليل الأداء")
+    c1, c2 = st.columns([6, 4])
+    
+    with c1:
+        top_p = data.groupby('الصنف')['Net_Profit'].sum().sort_values(ascending=False).head(10)
+        fig_p = px.bar(top_p, orientation='h', title="أعلى 10 أصناف تحقيقاً للربح", 
+                       labels={'value':'الربح بالجنيه', 'الصنف':''}, color_continuous_scale='Viridis')
+        st.plotly_chart(fig_p, use_container_width=True)
+        
+    with c2:
+        st.markdown("#### 📝 تحميل التقرير")
+        word_file = create_word_report(data.sort_values(by='Net_Profit', ascending=False), t_sales, t_profit, branch)
         st.download_button(
-            "📥 تحميل تقرير Word",
+            label="📝 تحميل التقرير الرسمي (Word)",
             data=word_file,
-            file_name=f"تقرير_زغلولة_{datetime.now().strftime('%Y%m%d')}.docx",
+            file_name=f"Zaghroula_Report_{datetime.now().strftime('%Y%m%d')}.docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
+        
+        if not low_stock.empty:
+            st.error("⚠️ قائمة النواقص")
+            st.dataframe(low_stock[['الصنف', 'الكمية المتبقية']], hide_index=True)
 
-    # ---------------- Guide
-    with tab4:
-        st.header("📘 دليل استخدام الداشبورد")
-
-        st.markdown("""
-        ### شرح الأقسام:
-
-        **1. Dashboard 📊**
-        - يعرض ملخص اليوم:
-          - إجمالي المبيعات
-          - صافي الأرباح
-          - عدد الأصناف الناقصة
-
-        **2. Inventory 📦**
-        - يعرض المنتجات التي كمية مخزونها أقل من أو تساوي 5.
-        - المنتجات هنا تحتاج إعادة طلب.
-
-        **3. Reports 📝**
-        - تحميل تقرير Word جاهز يحتوي على:
-          - إجمالي المبيعات
-          - الأرباح
-          - أفضل المنتجات
-
-        **4. فلترة حسب الصنف**
-        - يمكن اختيار صنف محدد لتحليل بياناته فقط.
-
-        ### ملاحظات مهمة:
-        - يتم حساب المبيعات من عمود: القيمة
-        - يتم حساب الأرباح من عمود: ربح
-        - الملف يجب أن يحتوي على الأعمدة الأساسية من برنامج المبيعات.
-
-        ### معنى المؤشرات:
-        - إجمالي المبيعات = مجموع قيمة الفواتير.
-        - صافي الأرباح = مجموع الأرباح الجاهزة من البرنامج.
-        - الأصناف الناقصة = المنتجات التي اقتربت من النفاد.
-        """)
-
-else:
-    st.info("ارفع ملف مبيعات للبدء")
+    st.markdown("---")
+    st.caption("تم التطوير بواسطة محمد جمال - AI Engineer")
