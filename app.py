@@ -8,25 +8,25 @@ from datetime import datetime
 # إعدادات الصفحة
 st.set_page_config(page_title="داشبورد زغلولة الذكية", layout="wide", page_icon="📈")
 
-# --- وظيفة إنشاء ملف الوورد (Word) ---
+# --- وظيفة إنشاء ملف الوورد ---
 def create_word_report(data, t_sales, t_profit, branch):
     doc = Document()
     doc.add_heading(f'تقرير مبيعات: {branch}', 0)
     doc.add_paragraph(f'تاريخ التقرير: {datetime.now().strftime("%Y-%m-%d")}')
     
-    doc.add_heading('الملخص المالي اليومي', level=1)
+    doc.add_heading('الملخص المالي', level=1)
     doc.add_paragraph(f'إجمالي المبيعات: {t_sales:,.2f} جنيه')
     doc.add_paragraph(f'صافي الأرباح: {t_profit:,.2f} جنيه')
     
-    doc.add_heading('أعلى الأصناف ربحية', level=1)
+    doc.add_heading('تحليل الأصناف (الأكثر ربحية)', level=1)
     table = doc.add_table(rows=1, cols=3)
     table.style = 'Table Grid'
     hdr_cells = table.rows[0].cells
     hdr_cells[0].text = 'الصنف'
-    hdr_cells[1].text = 'المبيعات'
+    hdr_cells[1].text = 'إجمالي المبيعات'
     hdr_cells[2].text = 'صافي الربح'
     
-    for _, row in data.head(15).iterrows():
+    for _, row in data.sort_values(by='Net_Profit', ascending=False).head(20).iterrows():
         row_cells = table.add_row().cells
         row_cells[0].text = str(row['الصنف'])
         row_cells[1].text = f"{row['Total_Sales']:,.2f}"
@@ -36,29 +36,22 @@ def create_word_report(data, t_sales, t_profit, branch):
     doc.save(target)
     return target.getvalue()
 
-# --- واجهة المستخدم ---
-st.title("📊 نظام تحليل مبيعات زغلولة الذكي")
+# --- الواجهة الرئيسية ---
+st.title("📊 نظام زغلولة لإدارة المبيعات")
 
-# --- سكشن دليل الاستخدام (User Guide) ---
-with st.expander("📖 دليل استخدام الداشبورد - اقرأني إذا كنت تحتاج مساعدة"):
+with st.expander("📖 دليل الاستخدام السريع"):
     st.markdown("""
-    ### كيف يعمل النظام؟
-    1. **رفع الملف:** قم برفع ملف الإكسيل المستخرج من نظام المبيعات (بصيغة `xls` أو `csv`).
-    2. **المعالجة الذكية:** يقوم النظام تلقائياً بتنظيف البيانات، وحساب الأرباح بناءً على (سعر البيع - سعر الشراء) مضروباً في الكمية.
-    3. **المؤشرات:** 
-        * **إجمالي المبيعات:** مجموع الفلوس اللي دخلت الدرج.
-        * **صافي الأرباح:** الفائدة الحقيقية بعد خصم تكلفة البضاعة.
-        * **الأصناف الناقصة:** تنبيه للأصناف التي رصيدها أقل من 5 قطع.
-    4. **التقارير:** يمكنك تحميل تقرير Word رسمي لطباعته أو حفظه.
+    1. ارفع ملف الـ **Excel** أو **CSV** الناتج من سيستم الكاشير.
+    2. تأكد أن الأعمدة تحتوي على (الصنف، الكمية، السعر، س شراء).
+    3. النظام سيحسب الربح بالمعادلة: `(سعر البيع - سعر الشراء) * الكمية`.
+    4. إذا ظهر الربح بالسالب، فهذا يعني أن سعر الشراء المسجل أكبر من سعر البيع.
     """)
-
-st.markdown("---")
 
 uploaded_file = st.file_uploader("📥 ارفع ملف مبيعات اليوم", type=['xls', 'csv'])
 
 if uploaded_file:
     @st.cache_data
-    def load_and_clean(file):
+    def process_data(file):
         try:
             df = pd.read_csv(file, encoding='cp1256')
         except:
@@ -66,60 +59,65 @@ if uploaded_file:
             
         branch = df['الفرع'].dropna().iloc[0] if 'الفرع' in df.columns else "الفرع الرئيسي"
         
-        # تنظيف البيانات
-        df_sales = df.dropna(subset=['رقم الفاتورة']).copy()
-        df_sales = df_sales[~df_sales['الصنف'].str.contains('اجمالى|وارد', na=False)]
+        # تنظيف البيانات الأساسية
+        df = df.dropna(subset=['رقم الفاتورة']).copy()
+        df = df[~df['الصنف'].str.contains('اجمالى|وارد', na=False)]
         
-        # تحويل الأعمدة لأرقام
-        for col in ['الكمية', 'السعر', 'س شراء', 'الكمية المتبقية']:
-            df_sales[col] = pd.to_numeric(df_sales[col].astype(str).str.replace('×', '').str.replace('x', '').str.strip(), errors='coerce')
+        # تحويل القيم لأرقام لضمان دقة الحسابات
+        cols_to_fix = ['الكمية', 'السعر', 'س شراء', 'الكمية المتبقية']
+        for col in cols_to_fix:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col].astype(str).str.replace('[^0-9.]', '', regex=True), errors='coerce').fillna(0)
         
-        df_sales['س شراء'] = df_sales['س شراء'].fillna(0)
+        # --- الحسبة الصحيحة للربح ---
+        df['Total_Sales'] = df['الكمية'] * df['السعر']
+        # ربح القطعة الواحدة = سعر البيع - سعر الشراء
+        df['Unit_Profit'] = df['السعر'] - df['س شراء']
+        # إجمالي ربح الصنف = ربح القطعة * الكمية المباعة
+        df['Net_Profit'] = df['Unit_Profit'] * df['الكمية']
         
-        # --- حل مشكلة الربح (الزيتونة هنا) ---
-        df_sales['Total_Sales'] = df_sales['الكمية'] * df_sales['السعر']
-        # الربح = (سعر البيع - سعر الشراء) * الكمية
-        df_sales['Net_Profit'] = (df_sales['السعر'] - df_sales['س شراء']) * df_sales['الكمية']
-        
-        return df_sales, branch
+        return df, branch
 
-    data, branch = load_and_clean(uploaded_file)
+    data, branch = process_data(uploaded_file)
 
     # عرض المؤشرات
-    st.subheader(f"📍 فرع: {branch}")
-    m1, m2, m3 = st.columns(3)
     t_sales = data['Total_Sales'].sum()
     t_profit = data['Net_Profit'].sum()
     
-    m1.metric("💰 إجمالي المبيعات", f"{t_sales:,.2f} ج.م")
-    m2.metric("📈 صافي الأرباح", f"{t_profit:,.2f} ج.م", delta=f"{((t_profit/t_sales)*100) if t_sales !=0 else 0:.1f}% هامش ربح")
+    col1, col2, col3 = st.columns(3)
+    col1.metric("💰 إجمالي المبيعات", f"{t_sales:,.2f} ج.م")
+    
+    # تلوين الربح (أحمر لو خسارة، أخضر لو ربح)
+    col2.metric("📈 صافي الأرباح", f"{t_profit:,.2f} ج.م", 
+                delta=f"{((t_profit/t_sales)*100) if t_sales !=0 else 0:.1f}% هامش ربح",
+                delta_color="normal" if t_profit >= 0 else "inverse")
     
     low_stock = data[data['الكمية المتبقية'] <= 5].drop_duplicates(subset=['الصنف'])
-    m3.metric("🚨 أصناف قربت تخلص", f"{len(low_stock)}")
+    col3.metric("🚨 نواقص المخزن", f"{len(low_stock)}")
 
-    # التحليلات البيانية
-    st.markdown("### 📊 تحليل الأداء")
-    c1, c2 = st.columns([6, 4])
+    # التحليلات
+    st.markdown("---")
+    c1, c2 = st.columns([7, 3])
     
     with c1:
+        # رسم بياني للأصناف الرابحة
         top_p = data.groupby('الصنف')['Net_Profit'].sum().sort_values(ascending=False).head(10)
-        fig_p = px.bar(top_p, orientation='h', title="أعلى 10 أصناف تحقيقاً للربح", 
-                       labels={'value':'الربح بالجنيه', 'الصنف':''}, color_continuous_scale='Viridis')
-        st.plotly_chart(fig_p, use_container_width=True)
-        
+        fig = px.bar(top_p, orientation='h', title="تحليل أرباح الأصناف",
+                     labels={'value':'الربح/الخسارة بالجنيه', 'الصنف':''},
+                     color=top_p.values, color_continuous_scale='RdYlGn')
+        st.plotly_chart(fig, use_container_width=True)
+
     with c2:
-        st.markdown("#### 📝 تحميل التقرير")
-        word_file = create_word_report(data.sort_values(by='Net_Profit', ascending=False), t_sales, t_profit, branch)
-        st.download_button(
-            label="📝 تحميل التقرير الرسمي (Word)",
-            data=word_file,
-            file_name=f"Zaghroula_Report_{datetime.now().strftime('%Y%m%d')}.docx",
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        )
+        st.info("📂 تقرير الوورد")
+        report_btn = create_word_report(data, t_sales, t_profit, branch)
+        st.download_button("📝 تحميل التقرير (Word)", report_btn, 
+                           file_name=f"Report_{branch}_{datetime.now().strftime('%d-%m')}.docx")
         
-        if not low_stock.empty:
-            st.error("⚠️ قائمة النواقص")
-            st.dataframe(low_stock[['الصنف', 'الكمية المتبقية']], hide_index=True)
+        # تنبيه لو فيه خسائر
+        losses = data[data['Net_Profit'] < 0]
+        if not losses.empty:
+            st.warning(f"⚠️ يوجد {len(losses)} أصناف مباعة بسعر أقل من التكلفة!")
+            st.dataframe(losses[['الصنف', 'السعر', 'س شراء', 'Net_Profit']].head(), hide_index=True)
 
     st.markdown("---")
-    st.caption("تم التطوير بواسطة محمد جمال - AI Engineer")
+    st.caption(f"تم التحليل لفرع {branch} | تطوير المهندس محمد جمال")
