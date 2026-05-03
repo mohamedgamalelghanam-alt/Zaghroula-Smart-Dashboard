@@ -1,5 +1,6 @@
 streamlit
 pandas
 plotly
-xlrd
 fpdf2
+arabic-reshaper
+python-bidi
