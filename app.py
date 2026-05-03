@@ -5,18 +5,18 @@ from docx import Document
 from io import BytesIO
 from datetime import datetime
 
-# --------------------------------
+# ---------------------------------------------------
 # إعداد الصفحة
-# --------------------------------
+# ---------------------------------------------------
 st.set_page_config(
     page_title="Zaghloula Smart Dashboard",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# --------------------------------
+# ---------------------------------------------------
 # CSS
-# --------------------------------
+# ---------------------------------------------------
 st.markdown("""
 <style>
 .main {
@@ -43,28 +43,20 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --------------------------------
-# إنشاء تقرير Word
-# --------------------------------
+# ---------------------------------------------------
+# تقرير Word
+# ---------------------------------------------------
 def create_word_report(data, total_sales, total_profit, branch):
     doc = Document()
 
-    doc.add_heading(f'تقرير مبيعات - {branch}', 0)
-    doc.add_paragraph(f'تاريخ التقرير: {datetime.now().strftime("%Y-%m-%d")}')
+    doc.add_heading(f"تقرير مبيعات - {branch}", 0)
+    doc.add_paragraph(
+        f"تاريخ التقرير: {datetime.now().strftime('%Y-%m-%d')}"
+    )
 
-    doc.add_heading('الملخص المالي', level=1)
-    doc.add_paragraph(f'إجمالي المبيعات: {total_sales:,.2f} جنيه')
-    doc.add_paragraph(f'صافي الأرباح: {total_profit:,.2f} جنيه')
-
-    doc.add_heading('أفضل الأصناف', level=1)
-
-    table = doc.add_table(rows=1, cols=3)
-    table.style = 'Table Grid'
-
-    headers = table.rows[0].cells
-    headers[0].text = 'الصنف'
-    headers[1].text = 'المبيعات'
-    headers[2].text = 'الربح'
+    doc.add_heading("الملخص المالي", level=1)
+    doc.add_paragraph(f"إجمالي المبيعات: {total_sales:,.2f} جنيه")
+    doc.add_paragraph(f"صافي الأرباح: {total_profit:,.2f} جنيه")
 
     top_products = (
         data.groupby('الصنف')[['Total_Sales', 'Net_Profit']]
@@ -74,78 +66,91 @@ def create_word_report(data, total_sales, total_profit, branch):
         .reset_index()
     )
 
+    doc.add_heading("أفضل الأصناف", level=1)
+
+    table = doc.add_table(rows=1, cols=3)
+    table.style = "Table Grid"
+
+    headers = table.rows[0].cells
+    headers[0].text = "الصنف"
+    headers[1].text = "المبيعات"
+    headers[2].text = "الربح"
+
     for _, row in top_products.iterrows():
-        row_cells = table.add_row().cells
-        row_cells[0].text = str(row['الصنف'])
-        row_cells[1].text = f"{row['Total_Sales']:,.2f}"
-        row_cells[2].text = f"{row['Net_Profit']:,.2f}"
+        cells = table.add_row().cells
+        cells[0].text = str(row["الصنف"])
+        cells[1].text = f"{row['Total_Sales']:,.2f}"
+        cells[2].text = f"{row['Net_Profit']:,.2f}"
 
     file = BytesIO()
     doc.save(file)
     return file.getvalue()
 
 
-# --------------------------------
+# ---------------------------------------------------
 # قراءة وتنظيف البيانات
-# --------------------------------
+# ---------------------------------------------------
 @st.cache_data
 def load_data(file):
     try:
-        df = pd.read_csv(file, encoding='cp1256')
+        df = pd.read_csv(file, encoding="cp1256")
     except:
         df = pd.read_excel(file)
 
     df = df.copy()
 
-    # اسم الفرع من عمود المخزن
     branch = (
-        df['المخزن'].dropna().iloc[0]
-        if 'المخزن' in df.columns
+        df["المخزن"].dropna().iloc[0]
+        if "المخزن" in df.columns
         else "الفرع الرئيسي"
     )
 
-    # حذف الصفوف غير المهمة
     unwanted_words = [
-        'وارد',
-        'إجمالي وارد',
-        'بيع نقدي',
-        'بيع آجل'
+        "وارد",
+        "إجمالي وارد",
+        "بيع نقدي",
+        "بيع آجل"
     ]
 
     df = df[
-        ~df['الصنف'].astype(str).str.contains(
-            '|'.join(unwanted_words),
+        ~df["الصنف"].astype(str).str.contains(
+            "|".join(unwanted_words),
             na=False
         )
     ]
 
-    # حذف الصفوف الفارغة
-    df = df.dropna(subset=['الكمية', 'السعر'])
+    df = df.dropna(subset=["الكمية"])
 
-    # الأعمدة الرقمية
     numeric_cols = [
-        'الكمية',
-        'السعر',
-        'س شراء',
-        'الكمية المتبقية'
+        "الكمية",
+        "السعر",
+        "س شراء",
+        "الكمية المتبقية",
+        "القيمة",
+        "ربح"
     ]
 
     for col in numeric_cols:
-        df[col] = pd.to_numeric(
-            df[col],
-            errors='coerce'
-        ).fillna(0)
+        if col in df.columns:
+            df[col] = pd.to_numeric(
+                df[col],
+                errors="coerce"
+            ).fillna(0)
 
-    # الحسابات
-    df['Total_Sales'] = df['الكمية'] * df['السعر']
-    df['Net_Profit'] = df['الكمية'] * (df['السعر'] - df['س شراء'])
+    # استخدام القيم الجاهزة من الملف
+    df["Total_Sales"] = df["القيمة"]
+
+    if "ربح" in df.columns:
+        df["Net_Profit"] = df["ربح"]
+    else:
+        df["Net_Profit"] = 0
 
     return df, branch
 
 
-# --------------------------------
+# ---------------------------------------------------
 # Sidebar
-# --------------------------------
+# ---------------------------------------------------
 with st.sidebar:
     st.title("🛒 زغلولة")
     st.markdown("### Smart Sales Dashboard")
@@ -156,42 +161,41 @@ with st.sidebar:
     )
 
 
-# --------------------------------
-# التطبيق الرئيسي
-# --------------------------------
+# ---------------------------------------------------
+# Main App
+# ---------------------------------------------------
 st.title("📊 نظام تحليل مبيعات زغلولة")
 
 if uploaded_file:
     data, branch = load_data(uploaded_file)
 
-    # فلترة الأصناف
     selected_product = st.selectbox(
         "فلترة حسب الصنف",
-        ["الكل"] + sorted(list(data['الصنف'].unique()))
+        ["الكل"] + sorted(list(data["الصنف"].unique()))
     )
 
     if selected_product != "الكل":
-        data = data[data['الصنف'] == selected_product]
+        data = data[data["الصنف"] == selected_product]
 
-    total_sales = data['Total_Sales'].sum()
-    total_profit = data['Net_Profit'].sum()
+    total_sales = data["Total_Sales"].sum()
+    total_profit = data["Net_Profit"].sum()
 
-    low_stock = data[data['الكمية المتبقية'] <= 5]
+    low_stock = data[data["الكمية المتبقية"] <= 5]
 
     best_product = (
-        data.groupby('الصنف')['Net_Profit']
+        data.groupby("الصنف")["Net_Profit"]
         .sum()
         .idxmax()
     )
 
-    # Tabs
-    tab1, tab2, tab3 = st.tabs([
+    tab1, tab2, tab3, tab4 = st.tabs([
         "📊 Dashboard",
         "📦 Inventory",
-        "📝 Reports"
+        "📝 Reports",
+        "📘 دليل الاستخدام"
     ])
 
-    # -------------------------------- Dashboard
+    # ---------------- Dashboard
     with tab1:
         st.subheader(f"📍 الفرع: {branch}")
 
@@ -200,34 +204,34 @@ if uploaded_file:
         with c1:
             st.markdown(f"""
             <div class="card">
-                <h2>إجمالي المبيعات</h2>
-                <h1>{total_sales:,.2f} ج.م</h1>
+            <h2>إجمالي المبيعات</h2>
+            <h1>{total_sales:,.2f} ج.م</h1>
             </div>
             """, unsafe_allow_html=True)
 
         with c2:
             st.markdown(f"""
             <div class="card">
-                <h2>صافي الأرباح</h2>
-                <h1>{total_profit:,.2f} ج.م</h1>
+            <h2>صافي الأرباح</h2>
+            <h1>{total_profit:,.2f} ج.م</h1>
             </div>
             """, unsafe_allow_html=True)
 
         with c3:
             st.markdown(f"""
             <div class="card">
-                <h2>الأصناف الناقصة</h2>
-                <h1>{len(low_stock)}</h1>
+            <h2>الأصناف الناقصة</h2>
+            <h1>{len(low_stock)}</h1>
             </div>
             """, unsafe_allow_html=True)
 
-        st.success(f"🔥 أكثر صنف ربحية: {best_product}")
+        st.success(f"🔥 أكثر صنف حقق ربح: {best_product}")
 
         col1, col2 = st.columns(2)
 
         with col1:
             top_profit = (
-                data.groupby('الصنف')['Net_Profit']
+                data.groupby("الصنف")["Net_Profit"]
                 .sum()
                 .sort_values(ascending=False)
                 .head(10)
@@ -236,23 +240,23 @@ if uploaded_file:
 
             fig1 = px.bar(
                 top_profit,
-                x='Net_Profit',
-                y='الصنف',
-                orientation='h',
-                title='أعلى 10 أصناف ربحية'
+                x="Net_Profit",
+                y="الصنف",
+                orientation="h",
+                title="أعلى 10 أصناف ربحية"
             )
             st.plotly_chart(fig1, use_container_width=True)
 
         with col2:
             fig2 = px.treemap(
                 data,
-                path=['الصنف'],
-                values='Total_Sales',
-                title='خريطة المبيعات'
+                path=["الصنف"],
+                values="Total_Sales",
+                title="خريطة المبيعات"
             )
             st.plotly_chart(fig2, use_container_width=True)
 
-    # -------------------------------- Inventory
+    # ---------------- Inventory
     with tab2:
         st.subheader("📦 إدارة المخزون")
 
@@ -260,11 +264,11 @@ if uploaded_file:
             st.warning("يوجد أصناف تحتاج إعادة طلب")
 
         st.dataframe(
-            low_stock[['الصنف', 'الكمية المتبقية']].drop_duplicates(),
+            low_stock[["الصنف", "الكمية المتبقية"]].drop_duplicates(),
             use_container_width=True
         )
 
-    # -------------------------------- Reports
+    # ---------------- Reports
     with tab3:
         st.subheader("📝 التقارير")
 
@@ -276,11 +280,48 @@ if uploaded_file:
         )
 
         st.download_button(
-            label="📥 تحميل تقرير Word",
+            "📥 تحميل تقرير Word",
             data=word_file,
             file_name=f"تقرير_زغلولة_{datetime.now().strftime('%Y%m%d')}.docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
+
+    # ---------------- Guide
+    with tab4:
+        st.header("📘 دليل استخدام الداشبورد")
+
+        st.markdown("""
+        ### شرح الأقسام:
+
+        **1. Dashboard 📊**
+        - يعرض ملخص اليوم:
+          - إجمالي المبيعات
+          - صافي الأرباح
+          - عدد الأصناف الناقصة
+
+        **2. Inventory 📦**
+        - يعرض المنتجات التي كمية مخزونها أقل من أو تساوي 5.
+        - المنتجات هنا تحتاج إعادة طلب.
+
+        **3. Reports 📝**
+        - تحميل تقرير Word جاهز يحتوي على:
+          - إجمالي المبيعات
+          - الأرباح
+          - أفضل المنتجات
+
+        **4. فلترة حسب الصنف**
+        - يمكن اختيار صنف محدد لتحليل بياناته فقط.
+
+        ### ملاحظات مهمة:
+        - يتم حساب المبيعات من عمود: القيمة
+        - يتم حساب الأرباح من عمود: ربح
+        - الملف يجب أن يحتوي على الأعمدة الأساسية من برنامج المبيعات.
+
+        ### معنى المؤشرات:
+        - إجمالي المبيعات = مجموع قيمة الفواتير.
+        - صافي الأرباح = مجموع الأرباح الجاهزة من البرنامج.
+        - الأصناف الناقصة = المنتجات التي اقتربت من النفاد.
+        """)
 
 else:
     st.info("ارفع ملف مبيعات للبدء")
