@@ -1,11 +1,49 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+from docx import Document
+from docx.shared import Inches
+from io import BytesIO
 from datetime import datetime
 
 # إعدادات الصفحة
 st.set_page_config(page_title="داشبورد زغلولة الذكية", layout="wide")
 
+# --- وظيفة إنشاء ملف الوورد (Word) ---
+def create_word_report(data, t_sales, t_profit, branch):
+    doc = Document()
+    # كتابة العنوان (بيدعم العربي عادي في الوورد)
+    doc.add_heading(f'تقرير مبيعات: {branch}', 0)
+    
+    doc.add_paragraph(f'تاريخ التقرير: {datetime.now().strftime("%Y-%m-%d")}')
+    
+    # ملخص الأرقام
+    doc.add_heading('الملخص المالي', level=1)
+    doc.add_paragraph(f'إجمالي المبيعات: {t_sales:,.2f} جنيه')
+    doc.add_paragraph(f'صافي الربح: {t_profit:,.2f} جنيه')
+    
+    # إضافة جدول الأصناف
+    doc.add_heading('أعلى الأصناف مبيعاً', level=1)
+    table = doc.add_table(rows=1, cols=3)
+    table.style = 'Table Grid'
+    hdr_cells = table.rows[0].cells
+    hdr_cells[0].text = 'الصنف'
+    hdr_cells[1].text = 'المبيعات'
+    hdr_cells[2].text = 'الربح'
+    
+    # إضافة أول 15 صنف للجدول
+    for _, row in data.head(15).iterrows():
+        row_cells = table.add_row().cells
+        row_cells[0].text = str(row['الصنف'])
+        row_cells[1].text = f"{row['Total_Sales']:,.2f}"
+        row_cells[2].text = f"{row['Net_Profit']:,.2f}"
+        
+    # حفظ الملف في ذاكرة مؤقتة
+    target = BytesIO()
+    doc.save(target)
+    return target.getvalue()
+
+# --- واجهة الداشبورد ---
 st.title("📊 نظام تحليل مبيعات زغلولة اليومي")
 st.markdown("---")
 
@@ -26,14 +64,13 @@ if uploaded_file:
         for col in ['الكمية', 'السعر', 'س شراء', 'الكمية المتبقية']:
             df_sales[col] = pd.to_numeric(df_sales[col].astype(str).str.replace('×', '').str.replace('x', '').str.strip(), errors='coerce')
         
-        df_sales['س شراء'] = df_sales['س شراء'].fillna(0)
+        df_sales['Net_Profit'] = (df_sales['الكمية'] * df_sales['السعر']) - df_sales['س شراء'].fillna(0)
         df_sales['Total_Sales'] = df_sales['الكمية'] * df_sales['السعر']
-        df_sales['Net_Profit'] = df_sales['Total_Sales'] - df_sales['س شراء']
         return df_sales, branch
 
     data, branch = load_and_clean(uploaded_file)
 
-    # 1. قسم الأرقام الرئيسية (Key Metrics)
+    # المؤشرات الرئيسية
     st.subheader(f"📍 فرع: {branch}")
     col1, col2, col3 = st.columns(3)
     t_sales = data['Total_Sales'].sum()
@@ -45,45 +82,25 @@ if uploaded_file:
     low_stock = data[data['الكمية المتبقية'] <= 5]
     col3.metric("🚨 أصناف ناقصة", f"{len(low_stock['الصنف'].unique())}")
 
-    st.markdown("---")
-
-    # 2. الرسوم البيانية
-    c1, c2 = st.columns(2)
-    with c1:
-        top_profit = data.groupby('الصنف')['Net_Profit'].sum().sort_values(ascending=False).head(10)
-        fig_profit = px.bar(top_profit, x=top_profit.values, y=top_profit.index, orientation='h', 
-                             title="أعلى 10 أصناف ربحية", color_discrete_sequence=['#2ecc71'])
-        st.plotly_chart(fig_profit, use_container_width=True)
-
-    with c2:
-        top_qty = data.groupby('الصنف')['الكمية'].sum().sort_values(ascending=False).head(10)
-        fig_qty = px.pie(values=top_qty.values, names=top_qty.index, title="توزيع الكميات المباعة")
-        st.plotly_chart(fig_qty, use_container_width=True)
-
-    # 3. قسم "الخلاصة للطباعة" (ال بديل للـ PDF)
-    st.markdown("### 📋 ملخص التقرير اليومي")
-    summary_text = f"""
-    * **الفرع:** {branch}
-    * **التاريخ:** {datetime.now().strftime('%Y-%m-%d')}
-    * **إجمالي المبيعات:** {t_sales:,.2f} جنيه
-    * **صافي الربح:** {t_profit:,.2f} جنيه
-    * **عدد الأصناف المباعة:** {len(data)} صنف
-    """
-    st.info(summary_text)
-
-    # 4. زرار تحميل إكسيل (CSV) شيك جداً وبيدعم العربي
-    st.markdown("### 📥 تصدير البيانات")
-    csv_data = data[['الصنف', 'الكمية', 'السعر', 'Total_Sales', 'Net_Profit', 'الكمية المتبقية']].to_csv(index=False).encode('utf-8-sig')
+    # --- زرار تحميل الوورد (Word) ---
+    st.markdown("### 📥 تحميل التقرير الرسمي")
+    word_file = create_word_report(data, t_sales, t_profit, branch)
     st.download_button(
-        label="📥 تحميل التقرير (Excel/CSV)",
-        data=csv_data,
-        file_name=f"تقرير_زغلولة_{datetime.now().strftime('%Y%m%d')}.csv",
-        mime='text/csv',
+        label="📝 تحميل التقرير (Word Document)",
+        data=word_file,
+        file_name=f"تقرير_زغلولة_{datetime.now().strftime('%Y%m%d')}.docx",
+        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
 
-    # 5. جدول النواقص
+    # الرسوم البيانية
+    c1, c2 = st.columns(2)
+    with c1:
+        top_p = data.groupby('الصنف')['Net_Profit'].sum().sort_values(ascending=False).head(10)
+        st.plotly_chart(px.bar(top_p, orientation='h', title="أعلى الأصناف ربحية"), use_container_width=True)
+    with c2:
+        top_q = data.groupby('الصنف')['الكمية'].sum().sort_values(ascending=False).head(10)
+        st.plotly_chart(px.pie(values=top_q.values, names=top_q.index, title="توزيع المبيعات"), use_container_width=True)
+
+    # قائمة النواقص
     st.markdown("### 🛒 قائمة النواقص")
-    if not low_stock.empty:
-        st.dataframe(low_stock[['الصنف', 'الكمية المتبقية']].drop_duplicates(), use_container_width=True)
-    else:
-        st.success("المخزن تمام، مفيش نواقص!")
+    st.dataframe(low_stock[['الصنف', 'الكمية المتبقية']].drop_duplicates(), use_container_width=True)
