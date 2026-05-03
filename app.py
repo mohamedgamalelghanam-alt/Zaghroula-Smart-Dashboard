@@ -1,39 +1,42 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 
-st.set_page_config(page_title="📊 Zaghloula Smart Dashboard", layout="wide")
+st.write("### تفعيل نظام زغلولة الذكي 🚀")
 
-@st.cache_data
-def load_data(file):
+file = st.file_uploader("ارفع الملف هنا")
+
+if file:
+    # محاولة قراءة شاملة
     try:
         df = pd.read_excel(file)
     except:
         df = pd.read_csv(file, encoding='cp1256')
-
-    # تنظيف أسماء الأعمدة من أي مسافات زيادة (حل مشكلة عدم ظهور النتائج)
-    df.columns = df.columns.str.strip()
-
-    # القاموس الذكي للأعمدة (عشان يلقط أي مسمى)
-    name_map = {
-        'صنف': ['صنف', 'الصنف', 'اسم الصنف'],
-        'كمية': ['كمية', 'الكمية', 'كميه'],
-        'قيمة': ['قيمة', 'القيمة', 'قيمه', 'ص صافي'],
-        'تكلفة': ['سعر التكلفة', 'س شراء', 'التكلفة', 'سعر شراء']
-    }
-
-    # دالة للبحث عن العمود الصحيح
-    def get_col(target):
-        for col in df.columns:
-            if col in name_map[target]:
-                return col
-        return None
-
-    col_name = get_col('صنف')
-    col_qty = get_col('كمية')
-    col_val = get_col('قيمة')
-    col_cost = get_col('تكلفة')
-
+    
+    # تنظيف أسماء الأعمدة من أي فراغات
+    df.columns = [str(c).strip() for c in df.columns]
+    
+    # عرض أسماء الأعمدة اللي لقاها عشان نتأكد
+    st.write("الأعمدة اللي السيستم شافها:", list(df.columns))
+    
+    # تحويل أهم الأعمدة لأرقام
+    target_cols = ['كمية', 'قيمة', 'سعر التكلفة']
+    for c in target_cols:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
+    
+    # الحسبة المباشرة
+    if 'قيمة' in df.columns and 'سعر التكلفة' in df.columns:
+        total_sales = df['قيمة'].sum()
+        # الربح = القيمة - (الكمية * التكلفة)
+        total_profit = (df['قيمة'] - (df['كمية'] * df['سعر التكلفة'])).sum()
+        
+        st.metric("إجمالي المبيعات", f"{total_sales:,.2f}")
+        st.metric("صافي الربح", f"{total_profit:,.2f}")
+        
+        st.write("### عينة من البيانات المرفوعة:")
+        st.dataframe(df.head())
+    else:
+        st.error("السيستم مش لاقي أعمدة (قيمة) أو (سعر التكلفة). تأكد من الملف!")
     # تنقية البيانات
     if col_name:
         df = df.dropna(subset=[col_name])
