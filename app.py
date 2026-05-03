@@ -2,38 +2,83 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# 1. إعداد الصفحة والعناوين الفخمة
 st.set_page_config(page_title="📊 Zaghloula Smart Dashboard", layout="wide")
 
-# 2. دالة معالجة البيانات (المحرك الرئيسي)
 @st.cache_data
 def load_data(file):
     try:
-        # قراءة الملف سواء كان Excel أو CSV
         df = pd.read_excel(file)
     except:
         df = pd.read_csv(file, encoding='cp1256')
 
-    # تنظيف البيانات من الصفوف غير المحاسبية
-    if 'صنف' in df.columns:
-        df = df.dropna(subset=['صنف'])
-        # استبعاد الصفوف اللي فيها كلمة "بيع" أو "اجمالى"
-        df = df[~df['صنف'].astype(str).str.contains('بيع|اجمالى|إجمالي', na=False)]
-    
-    # تحويل الأعمدة الرقمية لضمان عدم حدوث إيرور في الحسابات
-    numeric_cols = ['كمية', 'سعر', 'قيمة', 'سعر التكلفة', 'الرصيد الحالي']
-    for col in numeric_cols:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+    # تنظيف أسماء الأعمدة من أي مسافات زيادة (حل مشكلة عدم ظهور النتائج)
+    df.columns = df.columns.str.strip()
 
-    # الحسبة المعتمدة لصافي الربح
-    if 'قيمة' in df.columns and 'سعر التكلفة' in df.columns:
-        df['Total_Sales'] = df['قيمة']
-        df['Net_Profit'] = df['Total_Sales'] - (df['كمية'] * df['سعر التكلفة'])
+    # القاموس الذكي للأعمدة (عشان يلقط أي مسمى)
+    name_map = {
+        'صنف': ['صنف', 'الصنف', 'اسم الصنف'],
+        'كمية': ['كمية', 'الكمية', 'كميه'],
+        'قيمة': ['قيمة', 'القيمة', 'قيمه', 'ص صافي'],
+        'تكلفة': ['سعر التكلفة', 'س شراء', 'التكلفة', 'سعر شراء']
+    }
+
+    # دالة للبحث عن العمود الصحيح
+    def get_col(target):
+        for col in df.columns:
+            if col in name_map[target]:
+                return col
+        return None
+
+    col_name = get_col('صنف')
+    col_qty = get_col('كمية')
+    col_val = get_col('قيمة')
+    col_cost = get_col('تكلفة')
+
+    # تنقية البيانات
+    if col_name:
+        df = df.dropna(subset=[col_name])
+        df = df[~df[col_name].astype(str).str.contains('بيع|اجمالى|إجمالي', na=False)]
+
+    # تحويل الأرقام
+    for c in [col_qty, col_val, col_cost]:
+        if c:
+            df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
+
+    # الحسابات (بناءً على الأعمدة اللي لقاها)
+    if col_val and col_cost and col_qty:
+        df['Total_Sales'] = df[col_val]
+        # لو سعر التكلفة هو سعر الكيلو الواحد:
+        df['Net_Profit'] = df['Total_Sales'] - (df[col_qty] * df[col_cost])
     else:
         df['Total_Sales'] = 0
         df['Net_Profit'] = 0
 
+    return df, col_name
+
+# الواجهة
+st.title("📊 Zaghloula Smart Dashboard")
+
+uploaded_file = st.sidebar.file_uploader("ارفع ملف المبيعات", type=["xlsx", "xls", "csv"])
+
+if uploaded_file:
+    data, col_name = load_data(uploaded_file)
+    
+    t_sales = data['Total_Sales'].sum()
+    t_profit = data['Net_Profit'].sum()
+
+    if t_sales == 0:
+        st.warning("⚠️ الداتا اتقرت بس الحسابات طالعة صفر. اتأكد إن الأعمدة في الملف اسمها (صنف، كمية، قيمة، سعر التكلفة)")
+    
+    col1, col2 = st.columns(2)
+    col1.metric("💰 إجمالي المبيعات", f"{t_sales:,.2f} ج.م")
+    col2.metric("📈 صافي الأرباح", f"{t_profit:,.2f} ج.م")
+
+    if not data.empty and col_name:
+        top_10 = data.groupby(col_name)['Net_Profit'].sum().sort_values(ascending=False).head(10).reset_index()
+        st.plotly_chart(px.bar(top_10, x='Net_Profit', y=col_name, orientation='h', title="أعلى الأصناف ربحية"))
+    
+    st.markdown("---")
+    st.markdown("<div style='text-align: center; color: gray;'>تطوير المهندس محمد جمال | 01029796096</div>", unsafe_allow_html=True)
     # تحديد الفرع تلقائياً
     branch = "الفرع الرئيسي"
     if 'الفرع' in df.columns: branch = df['الفرع'].dropna().iloc[0]
