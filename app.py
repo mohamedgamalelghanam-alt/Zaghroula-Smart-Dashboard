@@ -2,93 +2,111 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from datetime import datetime
+from fpdf import FPDF
+import base64
 
-# إعدادات الصفحة
-st.set_page_config(page_title="Zaghroula Smart Analytics", layout="wide", page_icon="📈")
+# إعدادات الصفحة الاحترافية
+st.set_page_config(page_title="Zaghroula Business Intelligence", layout="wide", page_icon="📊")
 
-# --- 1. الافتتاحية ---
-st.title("🚀 نظام زغلولة للتحليل الذكي")
+# --- تحسين المظهر (Custom CSS) ---
+st.markdown("""
+    <style>
+    .main { background-color: #f5f7f9; }
+    .stMetric { background-color: #ffffff; padding: 20px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    h1 { color: #1E3A8A; font-family: 'Arial'; }
+    </style>
+    """, unsafe_allow_html=True)
 
-# --- 2. رفع الملف ---
-uploaded_file = st.file_uploader("📥 ارفع ملف مبيعات اليوم (xls/csv)", type=['xls', 'csv'])
+# --- دالة إنشاء الـ PDF ---
+def create_pdf(data, branch_name, sales, profit, low_stock_list):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", 'B', 16)
+    
+    # العنوان
+    pdf.cell(190, 10, f"Daily Performance Report - {branch_name}", ln=True, align='C')
+    pdf.set_font("Arial", '', 12)
+    pdf.cell(190, 10, f"Date: {datetime.now().strftime('%Y-%m-%d')}", ln=True, align='C')
+    pdf.ln(10)
+    
+    # ملخص الأرقام
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(95, 10, f"Total Sales: {sales:,.2f} EGP", border=1)
+    pdf.cell(95, 10, f"Net Profit: {profit:,.2f} EGP", border=1, ln=True)
+    pdf.ln(10)
+    
+    # جدول النواقص (لو وجد)
+    if not low_stock_list.empty:
+        pdf.set_text_color(255, 0, 0)
+        pdf.cell(190, 10, "Inventory Alerts (Low Stock):", ln=True)
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_font("Arial", '', 10)
+        for index, row in low_stock_list.iterrows():
+            pdf.cell(190, 8, f"- {row['الصنف']}: Remaining ({row['الكمية المتبقية']})", ln=True)
+    
+    return pdf.output(dest='S').encode('latin-1')
+
+# --- الجزء الرئيسي للبرنامج ---
+st.title("🛡️ Zaghroula BI Dashboard")
+
+uploaded_file = st.file_uploader("📥 Upload Daily Transaction File", type=['xls', 'csv'])
 
 if uploaded_file:
+    # وظيفة التنظيف
     @st.cache_data
-    def load_and_clean(file):
-        try:
-            df = pd.read_csv(file, encoding='cp1256')
-        except:
-            df = pd.read_excel(file)
-            
-        # استخراج اسم الفرع (بناخد أول قيمة غير فارغة من عمود 'الفرع')
-        branch_name = df['الفرع'].dropna().iloc[0] if 'الفرع' in df.columns else "فرع غير معروف"
-            
+    def load_data(file):
+        try: df = pd.read_csv(file, encoding='cp1256')
+        except: df = pd.read_excel(file)
+        
+        branch = df['الفرع'].dropna().iloc[0] if 'الفرع' in df.columns else "Main Branch"
         df_sales = df.dropna(subset=['رقم الفاتورة']).copy()
         df_sales = df_sales[~df_sales['الصنف'].str.contains('اجمالى|وارد', na=False)]
         
         for col in ['الكمية', 'السعر', 'س شراء', 'الكمية المتبقية']:
             df_sales[col] = pd.to_numeric(df_sales[col].astype(str).str.replace('×', '').str.replace('x', '').str.strip(), errors='coerce')
         
-        df_sales['س شراء'] = df_sales['س شراء'].fillna(0)
+        df_sales['Net_Profit'] = (df_sales['الكمية'] * df_sales['السعر']) - df_sales['س شراء']
         df_sales['Total_Sales'] = df_sales['الكمية'] * df_sales['السعر']
-        df_sales['Net_Profit'] = df_sales['Total_Sales'] - df_sales['س شراء']
-        
-        return df_sales, branch_name
+        return df_sales, branch
 
-    data, branch = load_and_clean(uploaded_file)
+    data, branch = load_data(uploaded_file)
 
-    # عرض اسم الفرع والبيانات التعريفية
-    st.markdown(f"""
-        ### 📍 تقرير: {branch}
-        **مرحباً بك في منصة دعم القرار. هذا التقرير مخصص لتحليل مبيعات فرعكم لليوم.**
-        ---
-        *تاريخ التقرير: {datetime.now().strftime('%Y-%m-%d')}*
-    """)
-
-    # --- 3. المؤشرات الرئيسية ---
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.info("💰 إجمالي المبيعات")
-        st.subheader(f"{data['Total_Sales'].sum():,.2f} ج.م")
-    with col2:
-        st.success("📈 صافي الأرباح")
-        st.subheader(f"{data['Net_Profit'].sum():,.2f} ج.م")
-    with col3:
-        low_stock = data[data['الكمية المتبقية'] <= 5]
-        st.error("🚨 أصناف للنفاذ")
-        st.subheader(f"{len(low_stock['الصنف'].unique())} صنف")
+    # الهيدر الاحترافي
+    st.subheader(f"📍 Location: {branch}")
+    
+    # كروت المؤشرات
+    m1, m2, m3, m4 = st.columns(4)
+    total_sales = data['Total_Sales'].sum()
+    total_profit = data['Net_Profit'].sum()
+    low_stock = data[data['الكمية المتبقية'] <= 5].drop_duplicates(subset=['الصنف'])
+    
+    m1.metric("Revenue", f"{total_sales:,.0f} EGP")
+    m2.metric("Net Profit", f"{total_profit:,.0f} EGP", delta=f"{(total_profit/total_sales)*100:.1f}% Margin")
+    m3.metric("Items Sold", len(data))
+    m4.metric("Low Stock Alerts", len(low_stock))
 
     st.markdown("---")
 
-    # --- 4. الرسوم البيانية ---
-    c1, c2 = st.columns(2)
-    with c1:
-        top_profit = data.groupby('الصنف')['Net_Profit'].sum().sort_values(ascending=False).head(10)
-        fig_profit = px.bar(top_profit, x=top_profit.values, y=top_profit.index, orientation='h', 
-                             title=f"أعلى الأصناف ربحية في {branch}", color_discrete_sequence=['#00CC96'])
-        st.plotly_chart(fig_profit, use_container_width=True)
-
-    with c2:
-        top_qty = data.groupby('الصنف')['الكمية'].sum().sort_values(ascending=False).head(10)
-        fig_qty = px.pie(values=top_qty.values, names=top_qty.index, title="توزيع سحب الكميات")
-        st.plotly_chart(fig_qty, use_container_width=True)
-
-    # --- 5. تصدير التقرير (مع إضافة اسم الفرع) ---
-    st.markdown("### 📥 تصدير التقرير")
+    # الرسوم البيانية
+    col_left, col_right = st.columns([6, 4])
     
-    report_data = data[['الصنف', 'الكمية', 'السعر', 'Total_Sales', 'Net_Profit', 'الكمية المتبقية']].copy()
-    report_data['الفرع'] = branch # إضافة عمود الفرع في الملف المستخرج
-    
-    csv = report_data.to_csv(index=False).encode('utf-8-sig')
-    
-    st.download_button(
-        label=f"🖨️ تحميل تقرير {branch} للطباعة",
-        data=csv,
-        file_name=f'Report_{branch}_{datetime.now().strftime("%Y-%m-%d")}.csv',
-        mime='text/csv',
-    )
+    with col_left:
+        top_items = data.groupby('الصنف')['Net_Profit'].sum().sort_values(ascending=False).head(10)
+        fig = px.bar(top_items, x=top_items.values, y=top_items.index, orientation='h', 
+                     title="Top 10 Profitable Items", color=top_items.values, color_continuous_scale='Viridis')
+        st.plotly_chart(fig, use_container_width=True)
 
-    # --- 6. جدول النواقص ---
-    if not low_stock.empty:
-        st.warning(f"⚠️ قائمة النواقص لـ {branch}")
-        st.dataframe(low_stock[['الصنف', 'الكمية المتبقية']].drop_duplicates(), use_container_width=True)
+    with col_right:
+        # زرار تحميل الـ PDF الاحترافي
+        st.markdown("### 📄 Export Report")
+        pdf_data = create_pdf(data, branch, total_sales, total_profit, low_stock)
+        st.download_button(
+            label="Download Official PDF Report",
+            data=pdf_data,
+            file_name=f"Zaghroula_Report_{branch}_{datetime.now().strftime('%Y-%m-%d')}.pdf",
+            mime="application/pdf"
+        )
+        
+        if not low_stock.empty:
+            st.error("⚠️ Immediate Stock Refill Required")
+            st.table(low_stock[['الصنف', 'الكمية المتبقية']].head(10))
