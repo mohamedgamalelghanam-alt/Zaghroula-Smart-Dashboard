@@ -5,12 +5,45 @@ from docx import Document
 from io import BytesIO
 from datetime import datetime
 
-# إعدادات الصفحة
-st.set_page_config(page_title="داشبورد زغلولة الذكية", layout="wide")
+st.set_page_config(
+    page_title="Zaghloula Smart Dashboard",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# -------------------------------
-# إنشاء تقرير Word
-# -------------------------------
+# ---------------------------
+# Custom CSS
+# ---------------------------
+st.markdown("""
+<style>
+.main {
+    background-color: #f8f9fa;
+}
+
+.card {
+    padding: 20px;
+    border-radius: 15px;
+    background: white;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    text-align: center;
+}
+
+.card h2 {
+    color: #2c3e50;
+    font-size: 20px;
+}
+
+.card h1 {
+    color: #27ae60;
+    font-size: 28px;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+# ---------------------------
+# Word Report
+# ---------------------------
 def create_word_report(data, total_sales, total_profit, branch):
     doc = Document()
 
@@ -19,50 +52,44 @@ def create_word_report(data, total_sales, total_profit, branch):
 
     doc.add_heading('الملخص المالي', level=1)
     doc.add_paragraph(f'إجمالي المبيعات: {total_sales:,.2f} جنيه')
-    doc.add_paragraph(f'صافي الربح: {total_profit:,.2f} جنيه')
+    doc.add_paragraph(f'صافي الأرباح: {total_profit:,.2f} جنيه')
 
-    doc.add_heading('أعلى الأصناف مبيعًا', level=1)
+    doc.add_heading('أفضل الأصناف', level=1)
 
     table = doc.add_table(rows=1, cols=3)
     table.style = 'Table Grid'
 
-    headers = table.rows[0].cells
-    headers[0].text = 'الصنف'
-    headers[1].text = 'المبيعات'
-    headers[2].text = 'الربح'
+    hdr = table.rows[0].cells
+    hdr[0].text = 'الصنف'
+    hdr[1].text = 'المبيعات'
+    hdr[2].text = 'الربح'
 
-    for _, row in data.head(15).iterrows():
-        row_cells = table.add_row().cells
-        row_cells[0].text = str(row['الصنف'])
-        row_cells[1].text = f"{row['Total_Sales']:,.2f}"
-        row_cells[2].text = f"{row['Net_Profit']:,.2f}"
+    for _, row in data.head(10).iterrows():
+        cells = table.add_row().cells
+        cells[0].text = str(row['الصنف'])
+        cells[1].text = f"{row['Total_Sales']:,.2f}"
+        cells[2].text = f"{row['Net_Profit']:,.2f}"
 
     file = BytesIO()
     doc.save(file)
     return file.getvalue()
 
 
-# -------------------------------
-# قراءة وتنظيف البيانات
-# -------------------------------
+# ---------------------------
+# Load Data
+# ---------------------------
 @st.cache_data
-def load_and_clean(file):
+def load_data(file):
     try:
-        df = pd.read_csv(file, encoding='cp1256')
+        df = pd.read_csv(file, encoding="cp1256")
     except:
         df = pd.read_excel(file)
 
-    required_cols = [
-        'الصنف',
-        'الكمية',
-        'السعر',
-        'س شراء',
-        'الكمية المتبقية'
-    ]
+    required = ['الصنف', 'الكمية', 'السعر', 'س شراء', 'الكمية المتبقية']
+    missing = [c for c in required if c not in df.columns]
 
-    missing = [col for col in required_cols if col not in df.columns]
     if missing:
-        st.error(f"الأعمدة الناقصة في الملف: {missing}")
+        st.error(f"أعمدة ناقصة: {missing}")
         st.stop()
 
     branch = (
@@ -75,10 +102,8 @@ def load_and_clean(file):
         df = df.dropna(subset=['رقم الفاتورة'])
 
     df = df.copy()
-    df = df[~df['الصنف'].astype(str).str.contains('اجمالى|وارد', na=False)]
 
-    numeric_cols = ['الكمية', 'السعر', 'س شراء', 'الكمية المتبقية']
-    for col in numeric_cols:
+    for col in required[1:]:
         df[col] = pd.to_numeric(
             df[col].astype(str)
             .str.replace('×', '')
@@ -87,118 +112,144 @@ def load_and_clean(file):
             errors='coerce'
         ).fillna(0)
 
-    # الحسابات الصحيحة
     df['Total_Sales'] = df['الكمية'] * df['السعر']
-    df['Net_Profit'] = (
-        df['الكمية'] * (df['السعر'] - df['س شراء'])
-    )
+    df['Net_Profit'] = df['الكمية'] * (df['السعر'] - df['س شراء'])
 
     return df, branch
 
 
-# -------------------------------
-# الواجهة الرئيسية
-# -------------------------------
-st.title("📊 نظام تحليل مبيعات زغلولة اليومي")
-st.markdown("---")
+# ---------------------------
+# Sidebar
+# ---------------------------
+with st.sidebar:
+    st.title("🛒 زغلولة")
+    st.markdown("### Smart Sales Dashboard")
+    uploaded_file = st.file_uploader(
+        "ارفع ملف المبيعات",
+        type=["csv", "xls", "xlsx"]
+    )
 
-uploaded_file = st.file_uploader(
-    "ارفع ملف المبيعات",
-    type=["csv", "xls", "xlsx"]
-)
+
+# ---------------------------
+# Main App
+# ---------------------------
+st.title("📊 نظام تحليل مبيعات زغلولة")
 
 if uploaded_file:
-    data, branch = load_and_clean(uploaded_file)
+    data, branch = load_data(uploaded_file)
+
+    # Filter
+    product_filter = st.selectbox(
+        "فلترة حسب الصنف",
+        ["الكل"] + list(data['الصنف'].unique())
+    )
+
+    if product_filter != "الكل":
+        data = data[data['الصنف'] == product_filter]
 
     total_sales = data['Total_Sales'].sum()
     total_profit = data['Net_Profit'].sum()
-
     low_stock = data[data['الكمية المتبقية'] <= 5]
 
-    st.subheader(f"📍 الفرع: {branch}")
+    best_product = data.groupby('الصنف')['Net_Profit'].sum().idxmax()
 
-    col1, col2, col3 = st.columns(3)
+    # Tabs
+    tab1, tab2, tab3 = st.tabs([
+        "📊 Dashboard",
+        "📦 Inventory",
+        "📝 Reports"
+    ])
 
-    col1.metric(
-        "💰 إجمالي المبيعات",
-        f"{total_sales:,.2f} ج.م"
-    )
+    # ---------------- Dashboard
+    with tab1:
+        st.subheader(f"📍 الفرع: {branch}")
 
-    col2.metric(
-        "📈 صافي الأرباح",
-        f"{total_profit:,.2f} ج.م"
-    )
+        c1, c2, c3 = st.columns(3)
 
-    col3.metric(
-        "🚨 أصناف ناقصة",
-        len(low_stock['الصنف'].unique())
-    )
+        with c1:
+            st.markdown(f"""
+            <div class="card">
+            <h2>إجمالي المبيعات</h2>
+            <h1>{total_sales:,.0f} ج.م</h1>
+            </div>
+            """, unsafe_allow_html=True)
 
-    if len(low_stock) > 0:
-        st.warning("يوجد أصناف تحتاج إعادة طلب سريع")
+        with c2:
+            st.markdown(f"""
+            <div class="card">
+            <h2>صافي الأرباح</h2>
+            <h1>{total_profit:,.0f} ج.م</h1>
+            </div>
+            """, unsafe_allow_html=True)
 
-    # تحميل تقرير Word
-    st.markdown("### 📥 تحميل التقرير")
+        with c3:
+            st.markdown(f"""
+            <div class="card">
+            <h2>الأصناف الناقصة</h2>
+            <h1>{len(low_stock)}</h1>
+            </div>
+            """, unsafe_allow_html=True)
 
-    word_file = create_word_report(
-        data,
-        total_sales,
-        total_profit,
-        branch
-    )
+        st.success(f"🔥 أكثر صنف ربحية اليوم: {best_product}")
 
-    st.download_button(
-        label="📝 تحميل التقرير Word",
-        data=word_file,
-        file_name=f"تقرير_زغلولة_{datetime.now().strftime('%Y%m%d')}.docx",
-        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    )
+        col1, col2 = st.columns(2)
 
-    # الرسوم البيانية
-    st.markdown("## 📊 التحليلات")
+        with col1:
+            top_profit = (
+                data.groupby('الصنف')['Net_Profit']
+                .sum()
+                .sort_values(ascending=False)
+                .head(10)
+                .reset_index()
+            )
 
-    c1, c2 = st.columns(2)
+            fig1 = px.bar(
+                top_profit,
+                x='Net_Profit',
+                y='الصنف',
+                orientation='h',
+                title='أعلى الأصناف ربحية'
+            )
+            st.plotly_chart(fig1, use_container_width=True)
 
-    with c1:
-        top_profit = (
-            data.groupby('الصنف')['Net_Profit']
-            .sum()
-            .sort_values(ascending=False)
-            .head(10)
-            .reset_index()
+        with col2:
+            fig2 = px.treemap(
+                data,
+                path=['الصنف'],
+                values='Total_Sales',
+                title='خريطة المبيعات'
+            )
+            st.plotly_chart(fig2, use_container_width=True)
+
+    # ---------------- Inventory
+    with tab2:
+        st.subheader("📦 إدارة المخزون")
+
+        if len(low_stock) > 0:
+            st.warning("يوجد أصناف تحتاج إعادة طلب")
+
+        st.dataframe(
+            low_stock[['الصنف', 'الكمية المتبقية']].drop_duplicates(),
+            use_container_width=True
         )
 
-        fig1 = px.bar(
-            top_profit,
-            x='Net_Profit',
-            y='الصنف',
-            orientation='h',
-            title="أعلى 10 أصناف ربحية"
-        )
-        st.plotly_chart(fig1, use_container_width=True)
+    # ---------------- Reports
+    with tab3:
+        st.subheader("📝 التقارير")
 
-    with c2:
-        top_sales = (
-            data.groupby('الصنف')['Total_Sales']
-            .sum()
-            .sort_values(ascending=False)
-            .head(10)
-            .reset_index()
+        word_file = create_word_report(
+            data,
+            total_sales,
+            total_profit,
+            branch
         )
 
-        fig2 = px.bar(
-            top_sales,
-            x='Total_Sales',
-            y='الصنف',
-            orientation='h',
-            title="أعلى 10 أصناف مبيعًا"
+        st.download_button(
+            "📥 تحميل تقرير Word",
+            data=word_file,
+            file_name=f"تقرير_زغلولة_{datetime.now().strftime('%Y%m%d')}.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
-        st.plotly_chart(fig2, use_container_width=True)
 
-    # جدول النواقص
-    st.markdown("## 🛒 قائمة النواقص")
-
-    st.dataframe(
-        low_stock[['الصنف', 'الكمية المتبقية']].drop_duplicates(),
-        use_container_width=True
-    )
+else:
+    st.info("ارفع ملف مبيعات للبدء")
