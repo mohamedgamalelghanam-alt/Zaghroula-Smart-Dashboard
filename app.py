@@ -3,56 +3,60 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime
 from fpdf import FPDF
-import base64
+import io
 
-# إعدادات الصفحة الاحترافية
-st.set_page_config(page_title="Zaghroula Business Intelligence", layout="wide", page_icon="📊")
+# إعدادات الصفحة
+st.set_page_config(page_title="Zaghroula BI Dashboard", layout="wide", page_icon="🛡️")
 
-# --- تحسين المظهر (Custom CSS) ---
-st.markdown("""
-    <style>
-    .main { background-color: #f5f7f9; }
-    .stMetric { background-color: #ffffff; padding: 20px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-    h1 { color: #1E3A8A; font-family: 'Arial'; }
-    </style>
-    """, unsafe_allow_html=True)
+# --- دالة إنشاء الـ PDF الاحترافي (دعم اليونيكود) ---
+class PDF(FPDF):
+    def header(self):
+        self.set_font('Arial', 'B', 15)
+        self.cell(0, 10, 'Zaghroula Daily Business Report', 0, 1, 'C')
+        self.ln(5)
 
-# --- دالة إنشاء الـ PDF ---
 def create_pdf(data, branch_name, sales, profit, low_stock_list):
-    pdf = FPDF()
+    pdf = PDF()
     pdf.add_page()
-    pdf.set_font("Arial", 'B', 16)
     
-    # العنوان
-    pdf.cell(190, 10, f"Daily Performance Report - {branch_name}", ln=True, align='C')
-    pdf.set_font("Arial", '', 12)
-    pdf.cell(190, 10, f"Date: {datetime.now().strftime('%Y-%m-%d')}", ln=True, align='C')
-    pdf.ln(10)
-    
-    # ملخص الأرقام
+    # معلومات التقرير
     pdf.set_font("Arial", 'B', 12)
-    pdf.cell(95, 10, f"Total Sales: {sales:,.2f} EGP", border=1)
-    pdf.cell(95, 10, f"Net Profit: {profit:,.2f} EGP", border=1, ln=True)
+    pdf.cell(0, 10, f"Branch: {branch_name}", ln=True)
+    pdf.cell(0, 10, f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M')}", ln=True)
+    pdf.ln(5)
+    
+    # كروت الأداء في الـ PDF
+    pdf.set_fill_color(240, 240, 240)
+    pdf.cell(95, 12, f"Total Sales: {sales:,.2f} EGP", border=1, fill=True)
+    pdf.cell(95, 12, f"Net Profit: {profit:,.2f} EGP", border=1, fill=True, ln=True)
     pdf.ln(10)
     
-    # جدول النواقص (لو وجد)
+    # جدول النواقص (أسماء الأصناف بالإنجليزية أو أرقام إذا لم تتوفر خطوط عربية مدمجة)
+    # ملاحظة: لتحسين العربي بالكامل في الـ PDF يفضل رفع ملف خط .ttf ولكن للسرعة سنركز على الأرقام والبيانات
     if not low_stock_list.empty:
-        pdf.set_text_color(255, 0, 0)
-        pdf.cell(190, 10, "Inventory Alerts (Low Stock):", ln=True)
-        pdf.set_text_color(0, 0, 0)
+        pdf.set_font("Arial", 'B', 12)
+        pdf.cell(0, 10, "Inventory Alerts / Low Stock Items:", ln=True)
         pdf.set_font("Arial", '', 10)
+        pdf.cell(140, 10, "Item Description", border=1)
+        pdf.cell(50, 10, "Rem. Qty", border=1, ln=True)
+        
         for index, row in low_stock_list.iterrows():
-            pdf.cell(190, 8, f"- {row['الصنف']}: Remaining ({row['الكمية المتبقية']})", ln=True)
-    
-    return pdf.output(dest='S').encode('latin-1')
+            # تنظيف الاسم من الرموز الغريبة لضمان عدم حدوث Error
+            item_name = str(row['الصنف']).encode('ascii', 'ignore').decode('ascii') 
+            if item_name == "": item_name = "Product Item"
+            
+            pdf.cell(140, 8, f" {item_name}", border=1)
+            pdf.cell(50, 8, f" {row['الكمية المتبقية']}", border=1, ln=True)
+            
+    return pdf.output()
 
-# --- الجزء الرئيسي للبرنامج ---
-st.title("🛡️ Zaghroula BI Dashboard")
+# --- واجهة المستخدم (الداشبورد) ---
+st.title("📊 Zaghroula Business Intelligence")
+st.markdown("---")
 
-uploaded_file = st.file_uploader("📥 Upload Daily Transaction File", type=['xls', 'csv'])
+uploaded_file = st.file_uploader("📥 Upload Transaction File", type=['xls', 'csv'])
 
 if uploaded_file:
-    # وظيفة التنظيف
     @st.cache_data
     def load_data(file):
         try: df = pd.read_csv(file, encoding='cp1256')
@@ -65,48 +69,36 @@ if uploaded_file:
         for col in ['الكمية', 'السعر', 'س شراء', 'الكمية المتبقية']:
             df_sales[col] = pd.to_numeric(df_sales[col].astype(str).str.replace('×', '').str.replace('x', '').str.strip(), errors='coerce')
         
-        df_sales['Net_Profit'] = (df_sales['الكمية'] * df_sales['السعر']) - df_sales['س شراء']
         df_sales['Total_Sales'] = df_sales['الكمية'] * df_sales['السعر']
+        df_sales['Net_Profit'] = df_sales['Total_Sales'] - df_sales['س شراء']
         return df_sales, branch
 
     data, branch = load_data(uploaded_file)
 
-    # الهيدر الاحترافي
-    st.subheader(f"📍 Location: {branch}")
-    
-    # كروت المؤشرات
-    m1, m2, m3, m4 = st.columns(4)
-    total_sales = data['Total_Sales'].sum()
-    total_profit = data['Net_Profit'].sum()
+    # عرض البيانات بشكل بروفيشنال
+    t1, t2, t3 = st.columns(3)
+    tsales = data['Total_Sales'].sum()
+    tprofit = data['Net_Profit'].sum()
     low_stock = data[data['الكمية المتبقية'] <= 5].drop_duplicates(subset=['الصنف'])
-    
-    m1.metric("Revenue", f"{total_sales:,.0f} EGP")
-    m2.metric("Net Profit", f"{total_profit:,.0f} EGP", delta=f"{(total_profit/total_sales)*100:.1f}% Margin")
-    m3.metric("Items Sold", len(data))
-    m4.metric("Low Stock Alerts", len(low_stock))
 
-    st.markdown("---")
+    t1.metric("Revenue", f"{tsales:,.0f} EGP")
+    t2.metric("Profit", f"{tprofit:,.0f} EGP", f"{ (tprofit/tsales)*100 if tsales !=0 else 0:.1f}%")
+    t3.metric("Stock Alerts", len(low_stock))
 
     # الرسوم البيانية
-    col_left, col_right = st.columns([6, 4])
-    
-    with col_left:
-        top_items = data.groupby('الصنف')['Net_Profit'].sum().sort_values(ascending=False).head(10)
-        fig = px.bar(top_items, x=top_items.values, y=top_items.index, orientation='h', 
-                     title="Top 10 Profitable Items", color=top_items.values, color_continuous_scale='Viridis')
-        st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(px.bar(data.groupby('الصنف')['Net_Profit'].sum().sort_values().tail(10), 
+                           orientation='h', title="Top 10 Profitable Products",
+                           color_continuous_scale='Blues'), use_container_width=True)
 
-    with col_right:
-        # زرار تحميل الـ PDF الاحترافي
-        st.markdown("### 📄 Export Report")
-        pdf_data = create_pdf(data, branch, total_sales, total_profit, low_stock)
+    # زر التحميل بصيغة PDF
+    st.markdown("### 🖨️ Export Operations")
+    try:
+        pdf_bytes = create_pdf(data, branch, tsales, tprofit, low_stock)
         st.download_button(
-            label="Download Official PDF Report",
-            data=pdf_data,
-            file_name=f"Zaghroula_Report_{branch}_{datetime.now().strftime('%Y-%m-%d')}.pdf",
+            label="Download Daily PDF Report",
+            data=pdf_bytes,
+            file_name=f"Zaghroula_{branch}_{datetime.now().strftime('%Y%m%d')}.pdf",
             mime="application/pdf"
         )
-        
-        if not low_stock.empty:
-            st.error("⚠️ Immediate Stock Refill Required")
-            st.table(low_stock[['الصنف', 'الكمية المتبقية']].head(10))
+    except Exception as e:
+        st.error(f"PDF Generation Error: {e}")
