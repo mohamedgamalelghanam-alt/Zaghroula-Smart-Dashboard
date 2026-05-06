@@ -2,63 +2,62 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-st.set_page_config(page_title="Zaghloula Smart Dashboard", layout="wide")
-st.title("📊 نظام زغلولة للتحليل الذكي")
+st.set_page_config(page_title="Zaghloula Dashboard", layout="wide")
+st.title("📊 نظام زغلولة للتحليل الدقيق")
 
 file = st.file_uploader("ارفع ملف مبيعات السبت", type=["xlsx", "xls", "csv"])
 
 if file:
     try:
-        # 1. قراءة الملف بأفضل وسيلة ممكنة
-        try:
-            df = pd.read_excel(file)
-        except:
-            df = pd.read_csv(file, encoding='cp1256')
+        # 1. قراءة الملف
+        df = pd.read_excel(file) if file.name.endswith(('xlsx', 'xls')) else pd.read_csv(file, encoding='cp1256')
 
-        # 2. تنقية الصفوف (حذف صف "بيع" والصفوف الفاضية)
-        # بنمسح أول صفين لو فيهم رموز أو كلمات مش مفهومة
-        df = df.dropna(how='all').reset_index(drop=True)
-        
-        # 3. الوصول للأعمدة عن طريق "الترتيب" (Index) لضمان الدقة
-        # عمود الصنف غالباً رقم 2، القيمة رقم 5، الربح رقم 6 (حسب ملفك)
-        # بنعمل تنظيف لأسماء الأعمدة برضه احتياطي
+        # 2. تنظيف شامل لأسماء الأعمدة (شيل أي رموز غريبة أو مسافات)
         df.columns = [str(c).strip() for c in df.columns]
-        
-        # دالة ذكية لإيجاد الأعمدة حتى لو الأسماء مشوهة
-        def find_col(keywords):
-            for i, col in enumerate(df.columns):
-                if any(key in col for key in keywords):
-                    return col
+
+        # 3. تحديد الأعمدة "بالاسم" أو "بالمحتوى الرقمي"
+        # بنحاول نلاقي العمود اللي فيه أرقام مبيعات وأرقام أرباح
+        def fix_numeric_col(keywords):
+            for col in df.columns:
+                if any(k in col for k in keywords):
+                    # التأكد إن العمود فيه أرقام مش نصوص (زي التاريخ أو الاسم)
+                    converted = pd.to_numeric(df[col], errors='coerce')
+                    if converted.notna().sum() > len(df) / 2: # لو أكتر من نص العمود أرقام يبقى هو ده
+                        return col
             return None
 
-        c_name = find_col(['صنف', 'الصنف']) or df.columns[2]
-        c_val = find_col(['قيمة', 'القيمة', 'صافي']) or df.columns[5]
-        c_profit = find_col(['ربح', 'الربح']) or df.columns[6]
+        col_val = fix_numeric_col(['قيمة', 'صافي', 'قيمه'])
+        col_profit = fix_numeric_col(['ربح', 'الربح'])
+        col_name = next((c for c in df.columns if 'صنف' in c), df.columns[2])
 
-        # 4. تحويل البيانات لأرقام وفلترة الصفوف الوهمية
-        df[c_val] = pd.to_numeric(df[c_val], errors='coerce').fillna(0)
-        df[c_profit] = pd.to_numeric(df[c_profit], errors='coerce').fillna(0)
-        
-        # فلترة: أي صف ربحه وصافي مبيعاته صفر (صفوف وهمية) نمسحه
-        df = df[(df[c_val] > 0) | (df[c_profit] > 0)]
-        df = df[~df[c_name].astype(str).str.contains('بيع|إجمالي|اجمالى', na=False)]
+        if col_val and col_profit:
+            # 4. تنظيف الصفوف الوهمية (مثل صف "بيع")
+            df = df.dropna(subset=[col_name])
+            df = df[~df[col_name].astype(str).str.contains('بيع|إجمالي|اجمالى', na=False)]
 
-        # 5. النتائج اللي بنستناها
-        total_sales = df[c_val].sum()
-        total_profit = df[c_profit].sum()
+            # تحويل القيم لأرقام حقيقية
+            df[col_val] = pd.to_numeric(df[col_val], errors='coerce').fillna(0)
+            df[col_profit] = pd.to_numeric(df[col_profit], errors='coerce').fillna(0)
 
-        st.success("✅ تم تحليل البيانات بنجاح")
-        col1, col2 = st.columns(2)
-        col1.metric("💰 إجمالي مبيعات السبت", f"{total_sales:,.2f} ج.م")
-        col2.metric("📈 صافي أرباح السبت", f"{total_profit:,.2f} ج.م")
+            # 5. الحسابات النهائية
+            total_sales = df[col_val].sum()
+            total_profit = df[col_profit].sum()
 
-        # الرسم البياني
-        st.subheader("🚀 أعلى 10 أصناف مكسباً")
-        top_10 = df.groupby(c_name)[c_profit].sum().sort_values(ascending=False).head(10).reset_index()
-        fig = px.bar(top_10, x=c_profit, y=c_name, orientation='h', color=c_profit, color_continuous_scale='Greens')
-        st.plotly_chart(fig, use_container_width=True)
+            # العرض
+            st.success("✅ تم ضبط الأعمدة وحساب الأرقام الحقيقية")
+            c1, c2 = st.columns(2)
+            c1.metric("💰 إجمالي المبيعات", f"{total_sales:,.2f} ج.م")
+            c2.metric("📈 صافي الأرباح", f"{total_profit:,.2f} ج.م")
+
+            # الرسم البياني
+            top_10 = df.groupby(col_name)[col_profit].sum().sort_values(ascending=False).head(10).reset_index()
+            fig = px.bar(top_10, x=col_profit, y=col_name, orientation='h', color=col_profit, title="أعلى الأصناف ربحية")
+            st.plotly_chart(fig, use_container_width=True)
+            
+        else:
+            st.error("السيستم مش قادر يحدد أعمدة الأرقام. اتأكد إن أسماء الأعمدة (قيمة) و (إجمالي ربح) واضحة.")
 
     except Exception as e:
-        st.error(f"حدث خطأ بسيط، برجاء التأكد من الملف: {e}")
+        st.error(f"خطأ في القراءة: {e}")
 else:
-    st.info("يا هندسة ارفع الملف عشان الأرقام الحقيقية تظهر")
+    st.info("ارفع الملف يا هندسة عشان نصلح التشفير ده")
