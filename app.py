@@ -1,9 +1,6 @@
 import streamlit as st
 import pandas as pd
-try:
-    import plotly.express as px
-except ImportError:
-    st.error("جاري تحميل المكتبات... يرجى الانتظار دقيقة وعمل ريفريش.")
+import plotly.express as px
 
 st.set_page_config(page_title="Zaghloula Dashboard", layout="wide")
 st.title("📊 Zaghloula Smart Dashboard")
@@ -12,33 +9,45 @@ file = st.file_uploader("ارفع ملف مبيعات السبت", type=["xlsx",
 
 if file:
     try:
-        # قراءة الملف
+        # 1. قراءة الملف
         try:
             df = pd.read_excel(file)
         except:
             df = pd.read_csv(file, encoding='cp1256')
 
-        # تنظيف أسماء الأعمدة
+        # 2. تنظيف أسماء الأعمدة من أي مسافات
         df.columns = [str(c).strip() for c in df.columns]
 
-        if 'قيمة' in df.columns and 'إجمالي ربح' in df.columns:
-            # تحويل الأرقام
-            df['قيمة'] = pd.to_numeric(df['قيمة'], errors='coerce').fillna(0)
-            df['إجمالي ربح'] = pd.to_numeric(df['إجمالي ربح'], errors='coerce').fillna(0)
-            
-            sales = df['قيمة'].sum()
-            profit = df['إجمالي ربح'].sum()
+        # 3. فلترة البيانات (أهم خطوة للوصول للرقم الحقيقي)
+        # هنشيل أي صف فيه كلمة "بيع" أو "اجمالى" أو "إجمالي" أو خلايا فاضية في اسم الصنف
+        if 'صنف' in df.columns:
+            df = df.dropna(subset=['صنف'])
+            df = df[~df['صنف'].astype(str).str.contains('بيع|اجمالى|إجمالي', na=False)]
 
-            c1, c2 = st.columns(2)
-            c1.metric("💰 إجمالي المبيعات", f"{sales:,.2f} ج.م")
-            c2.metric("📈 صافي الأرباح", f"{profit:,.2f} ج.م")
-            
-            # رسم بياني بسيط لو plotly اشتغلت
-            if 'صنف' in df.columns:
-                top = df.groupby('صنف')['إجمالي ربح'].sum().sort_values(ascending=False).head(10).reset_index()
-                fig = px.bar(top, x='إجمالي ربح', y='صنف', orientation='h', title="أعلى 10 أصناف ربحية")
-                st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.error(f"الأعمدة ناقصة. الموجود: {list(df.columns)}")
+        # 4. تحويل الأعمدة لأرقام حقيقية
+        for c in ['قيمة', 'إجمالي ربح', 'كمية']:
+            if c in df.columns:
+                df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
+
+        # 5. الحسابات النهائية
+        sales = df['قيمة'].sum()
+        profit = df['إجمالي ربح'].sum()
+
+        # العرض الفخم
+        st.success("✅ تم تنقية البيانات وحساب الأرباح الحقيقية")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.metric("💰 إجمالي المبيعات (الدرج)", f"{sales:,.2f} ج.م")
+        with c2:
+            st.metric("📈 صافي الأرباح (الفكّة)", f"{profit:,.2f} ج.م")
+
+        # رسم بياني لأعلى الأصناف ربحاً عشان تتأكد إن الأرقام منطقية
+        st.subheader("🚀 أكتر 10 أصناف كسبتك النهاردة")
+        top_10 = df.groupby('صنف')['إجمالي ربح'].sum().sort_values(ascending=False).head(10).reset_index()
+        fig = px.bar(top_10, x='إجمالي ربح', y='صنف', orientation='h', color='إجمالي ربح', color_continuous_scale='Viridis')
+        st.plotly_chart(fig, use_container_width=True)
+
     except Exception as e:
-        st.error(f"خطأ: {e}")
+        st.error(f"حدث خطأ: {e}")
+else:
+    st.info("ارفع ملف السبت يا هندسة عشان نطلع الأرقام الصح")
