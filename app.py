@@ -1,72 +1,149 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+from docx import Document
+from io import BytesIO
+from datetime import datetime
 
-st.set_page_config(page_title="Zaghloula Day 1 - Emergency", layout="wide")
-st.title("📊 نظام زغلولة - تحليل الداتا الأولى (النسخة السريعة)")
+# ---------------------------------------------------
+# إعداد الصفحة والعنوان
+# ---------------------------------------------------
+st.set_page_config(
+    page_title="📊 Zaghloula Smart Dashboard",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-uploaded_file = st.sidebar.file_uploader("ارفع ملف Day 1", type=["csv"])
+# ---------------------------------------------------
+# التنسيق (CSS)
+# ---------------------------------------------------
+st.markdown("""
+<style>
+.main { background-color: #f8f9fa; }
+.card {
+    padding: 20px;
+    border-radius: 15px;
+    background: white;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    text-align: center;
+}
+.card h2 { color: #2c3e50; font-size: 18px; margin-bottom: 10px; }
+.card h1 { color: #27ae60; font-size: 26px; }
+</style>
+""", unsafe_allow_html=True)
+
+# ---------------------------------------------------
+# وظيفة معالجة الملف
+# ---------------------------------------------------
+@st.cache_data
+def load_data(file):
+    try:
+        df = pd.read_csv(file, encoding='cp1256')
+    except:
+        try:
+            df = pd.read_excel(file)
+        except:
+            df = pd.read_csv(file, encoding='utf-8', errors='ignore')
+
+    df = df.copy()
+    branch = "الفرع الرئيسي"
+    if "الفرع" in df.columns: branch = df["الفرع"].dropna().iloc[0]
+    elif "المخزن" in df.columns: branch = df["المخزن"].dropna().iloc[0]
+
+    unwanted = ["وارد", "اجمالى", "إجمالي", "بيع نقدي"]
+    df = df.dropna(subset=['الصنف'])
+    df = df[~df['الصنف'].astype(str).str.contains("|".join(unwanted), na=False)]
+
+    cols = ["الكمية", "السعر", "س شراء", "الكمية المتبقية"]
+    for col in cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+
+    df['Total_Sales'] = df['الكمية'] * df['السعر']
+    df['Net_Profit'] = df['Total_Sales'] - df['س شراء']
+    df['Margin'] = (df['Net_Profit'] / df['س شراء'].replace(0, 1)) * 100
+
+    return df, branch
+
+# ---------------------------------------------------
+# Sidebar
+# ---------------------------------------------------
+with st.sidebar:
+    st.markdown("## 🛒 زغلولة")
+    uploaded_file = st.file_uploader("ارفع ملف المبيعات", type=["csv", "xls", "xlsx"])
+
+# ---------------------------------------------------
+# Main App
+# ---------------------------------------------------
+st.title("📊 Zaghloula Smart Dashboard")
 
 if uploaded_file:
-    try:
-        # قراءة الملف بأكثر من طريقة لضمان فك التشفير
-        try:
-            df = pd.read_csv(uploaded_file, encoding='utf-8-sig')
-        except:
-            df = pd.read_csv(uploaded_file, encoding='cp1256')
+    data, branch = load_data(uploaded_file)
+    selected = st.selectbox("تصفية البيانات حسب الصنف", ["الكل"] + sorted(list(data["الصنف"].unique())))
+    f_data = data.copy()
+    if selected != "الكل":
+        f_data = f_data[f_data["الصنف"] == selected]
 
-        # حذف الصفوف الفاضية تماماً
-        df = df.dropna(how='all').reset_index(drop=True)
+    t_sales = f_data["Total_Sales"].sum()
+    t_profit = f_data["Net_Profit"].sum()
+    low_stock = f_data[f_data["الكمية المتبقية"] <= 5]
+    at_loss = f_data[f_data['Net_Profit'] < 0]
+    low_margin = f_data[(f_data['Net_Profit'] >= 0) & (f_data['Margin'] < 5)]
 
-        # --- الحل الجذري: القراءة بالترتيب (Index) وليس بالاسم ---
-        # بناءً على ملف "Day 1" اللي رفعته:
-        # العمود رقم 2 هو الصنف
-        # العمود رقم 3 هو الكمية
-        # العمود رقم 4 هو السعر
+    t1, t2, t3 = st.tabs(["📈 التحليل المالي", "📦 الرقابة والمخزون", "📘 وثيقة دليل الاستخدام"])
+
+    with t1:
+        st.info(f"📍 بيانات الفرع الحالي: {branch}")
+        c1, c2, c3 = st.columns(3)
+        with c1: st.markdown(f'<div class="card"><h2>إجمالي قيمة المبيعات</h2><h1>{t_sales:,.2f} ج.م</h1></div>', unsafe_allow_html=True)
+        with c2: st.markdown(f'<div class="card"><h2>صافي الأرباح التشغيلية</h2><h1>{t_profit:,.2f} ج.م</h1></div>', unsafe_allow_html=True)
+        with c3: st.markdown(f'<div class="card"><h2>تنبيهات نقص المخزون</h2><h1>{len(low_stock)}</h1></div>', unsafe_allow_html=True)
+
+        col_a, col_b = st.columns(2)
+        with col_a:
+            top = f_data.groupby("الصنف")["Net_Profit"].sum().sort_values(ascending=False).head(10).reset_index()
+            st.plotly_chart(px.bar(top, x="Net_Profit", y="الصنف", orientation='h', title="مؤشر أعلى 10 أصناف ربحية"), use_container_width=True)
+        with col_b:
+            st.plotly_chart(px.treemap(f_data, path=["الصنف"], values="Total_Sales", title="الهيكل النسبي للمبيعات"), use_container_width=True)
+
+    with t2:
+        st.subheader("⚠️ الأصناف الخاضعة للمراجعة")
+        col_1, col_2 = st.columns(2)
+        with col_1:
+            st.error(f"❌ أصناف تحقق خسارة رأس مالية ({len(at_loss)})")
+            st.dataframe(at_loss[['الصنف', 'Net_Profit']], use_container_width=True)
+        with col_2:
+            st.warning(f"📉 أصناف ذات هامش ربح منخفض < 5% ({len(low_margin)})")
+            st.dataframe(low_margin[['الصنف', 'Net_Profit']], use_container_width=True)
         
-        name_col = df.columns[2]
-        qty_col = df.columns[3]
-        price_col = df.columns[4]
+        st.subheader("📦 حالة المخزن (النواقص)")
+        st.dataframe(low_stock[['الصنف', 'الكمية المتبقية']], use_container_width=True)
 
-        # تحويل الأرقام (تنظيف الداتا من أي رموز زي × أو *)
-        def clean_number(val):
-            if pd.isna(val): return 0
-            val = str(val).replace(',', '').replace('×', '').replace('*', '').strip()
-            try:
-                return float(val)
-            except:
-                return 0
+    # --- دليل الاستخدام الرسمي ---
+    with t3:
+        st.header("📘 الدليل التشغيلي للنظام")
+        st.markdown("""
+        ### **1. مقدمة عن النظام**
+        يعمل نظام **Zaghloula Smart Dashboard** كأداة تحليلية متقدمة تهدف إلى تحويل سجلات البيع الخام إلى مؤشرات أداء مالية دقيقة، لمساعدة الإدارة في اتخاذ قرارات مبنية على البيانات.
 
-        df['Clean_Qty'] = df[qty_col].apply(clean_number)
-        df['Clean_Price'] = df[price_col].apply(clean_number)
-        
-        # حساب المبيعات (كمية × سعر)
-        df['Sales'] = df['Clean_Qty'] * df['Clean_Price']
-        
-        # حساب ربح تقديري (لو مفيش عمود ربح واضح، هنفترض نسبة 25% كمتوسط لمحلك)
-        df['Profit'] = df['Sales'] * 0.25 
+        ### **2. معالجة البيانات (Data Processing)**
+        *   **التنقية الآلية:** يقوم النظام باستبعاد العمليات غير التشغيلية (مثل حركات الوارد أو الإجماليات اليدوية) لضمان دقة النتائج.
+        *   **التوافقية:** النظام مهيأ للتعامل مع ملفات السيستم بترميز (CP1256) لضمان قراءة اللغة العربية بشكل سليم دون أخطاء برمجية.
 
-        # فلترة الصفوف اللي ملهاش لازمة
-        df = df[df['Sales'] > 0]
-        df = df[~df[name_col].astype(str).str.contains('وارد|إجمالي|اجمالى', na=False)]
+        ### **3. المنهجية الحسابية**
+        *   **إجمالي المبيعات:** يتم حسابه بناءً على (الكمية المباعة × سعر البيع الفعلي).
+        *   **صافي الربح:** يتم استخراجه بطرح (سعر الشراء الكلي) من (إجمالي المبيعات) لكل صنف على حدة.
+        *   **تحليل الهوامش:** يقوم النظام برصد الأصناف التي يقل هامش ربحها عن **5%** لتنبيه الإدارة بضرورة مراجعة سياسة التسعير.
 
-        # الحسابات النهائية
-        total_sales = df['Sales'].sum()
-        total_profit = df['Profit'].sum()
+        ### **4. الرقابة على المخزون**
+        يعتمد النظام معياراً حسابياً لرصد النواقص، حيث يتم إدراج أي صنف تقل كميته المتبقية عن **5 وحدات** ضمن قائمة التنبيهات الفورية.
 
-        # العرض
-        c1, c2 = st.columns(2)
-        c1.metric("💰 إجمالي المبيعات (تقديري)", f"{total_sales:,.2f} ج.م")
-        c2.metric("📈 صافي الأرباح (25% تقديري)", f"{total_profit:,.2f} ج.م")
+        ---
+        *تم تطوير هذا المستند البرمجي لضمان أعلى معايير الدقة والشفافية في العرض المالي.*
+        """)
 
-        st.markdown("---")
-        st.subheader("📋 مراجعة البيانات")
-        st.write("الأصناف اللي تم قراءتها:")
-        st.dataframe(df[[name_col, 'Clean_Qty', 'Clean_Price', 'Sales']].head(20))
+    st.markdown("---")
+    st.markdown("<div style='text-align: center; color: gray; font-size: 14px;'>تطوير المهندس محمد جمال | 01029796096</div>", unsafe_allow_html=True)
 
-    except Exception as e:
-        st.error(f"حصلت مشكلة في قراءة الملف: {e}")
 else:
-    st.info("ارفع ملف Day 1 عشان نخلص يا هندسة!")
-
-st.markdown("<center>تطوير المهندس محمد جمال</center>", unsafe_allow_html=True)
+    st.info("يرجى رفع ملف البيانات لبدء عملية التحليل المالي.")
