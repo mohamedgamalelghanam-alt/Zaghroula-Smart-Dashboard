@@ -48,7 +48,7 @@ def create_word_report(data, t_sales, t_profit, branch):
     target = BytesIO(); doc.save(target)
     return target.getvalue()
 
-st.title("📊 لوحة تحكم زغلولة الذكية")
+st.title("📊تحليل مبيعات زغلوله اليومي")
 st.markdown("---")
 
 uploaded_file = st.sidebar.file_uploader("📂 ارفع ملف المبيعات", type=['xls', 'csv', 'xlsx'])
