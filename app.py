@@ -6,116 +6,147 @@ from io import BytesIO
 from datetime import datetime
 import re
 
-# 1. إعدادات الصفحة والستايل المريح للعين
+# 1. إعدادات الصفحة والستايل الاحترافي المريح للعين
 st.set_page_config(page_title="Zaghloula Smart Dashboard", layout="wide", page_icon="☕")
 
 st.markdown("""
 <style>
-    .main { background-color: #ffffff; }
-    /* علامة مائية هادئة جداً وغير مؤثرة على القراءة */
-    .main::before {
-        content: "ZAGHLOULA";
-        position: fixed; top: 50%; left: 50%;
-        transform: translate(-50%, -50%) rotate(-30deg);
-        font-size: 10vw; color: rgba(0,0,0,0.01);
-        z-index: -1; font-weight: bold;
-    }
+    .main { background-color: #fcfcfc; }
+    /* ستايل الكروت الحديثة */
     .metric-card {
-        background: #f9f9f9; padding: 20px; border-radius: 12px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-        border: 1px solid #eee; text-align: center;
+        background: white; padding: 25px; border-radius: 15px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+        border-top: 5px solid #27ae60; text-align: center;
     }
-    h2 { color: #555; font-size: 1rem; }
-    h1 { font-size: 1.8rem; color: #2c3e50; }
+    .metric-card.profit { border-top: 5px solid #2980b9; }
+    .metric-card.warning { border-top: 5px solid #e74c3c; }
+    h2 { color: #5c5c5c; font-size: 1.1rem; margin-bottom: 10px; font-weight: 500; }
+    h1 { font-size: 2.2rem; margin: 0; color: #1e272e; font-weight: bold; }
+    .stTabs [data-baseweb="tab-list"] { gap: 24px; }
+    .stTabs [data-baseweb="tab"] {
+        height: 50px; background-color: #f1f2f6; border-radius: 10px;
+        padding: 10px 25px; font-weight: bold;
+    }
+    .stTabs [aria-selected="true"] { background-color: #27ae60 !important; color: white !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# وظيفة إنشاء الوورد
-def create_word_report(data, t_sales, t_profit):
+# --- وظيفة إنشاء ملف الوورد ---
+def create_word_report(data, t_sales, t_profit, branch):
     doc = Document()
-    doc.add_heading('تقرير مبيعات زغلولة اليومي', 0)
+    doc.add_heading(f'تقرير مبيعات زغلولة - {branch}', 0)
     doc.add_paragraph(f'تاريخ التقرير: {datetime.now().strftime("%Y-%m-%d")}')
     doc.add_heading('الملخص المالي', level=1)
-    doc.add_paragraph(f'المبيعات: {t_sales:,.2f} ج.م | الأرباح: {t_profit:,.2f} ج.م')
+    doc.add_paragraph(f'إجمالي المبيعات: {t_sales:,.2f} جنيه')
+    doc.add_paragraph(f'صافي الربح: {t_profit:,.2f} جنيه')
     table = doc.add_table(rows=1, cols=3); table.style = 'Table Grid'
     hdr = table.rows[0].cells; hdr[0].text, hdr[1].text, hdr[2].text = 'الصنف', 'المبيعات', 'الربح'
     for _, row in data.head(20).iterrows():
-        c = table.add_row().cells
-        c[0].text, c[1].text, c[2].text = str(row['الصنف']), f"{row['Total_Sales']:,.2f}", f"{row['Net_Profit']:,.2f}"
+        row_cells = table.add_row().cells
+        row_cells[0].text, row_cells[1].text, row_cells[2].text = str(row['الصنف']), f"{row['Total_Sales']:,.2f}", f"{row['Net_Profit']:,.2f}"
     target = BytesIO(); doc.save(target)
     return target.getvalue()
 
-st.title("☕ داشبورد زغلولة (نسخة العمل اليومي)")
+# --- هيدر التطبيق ---
+st.title("📊 نظام زغلولة للتحليل الذكي")
+st.markdown("---")
 
-uploaded_file = st.sidebar.file_uploader("ارفع ملف الداتا", type=['xls', 'csv', 'xlsx'])
+uploaded_file = st.sidebar.file_uploader("📂 ارفع ملف مبيعات اليوم", type=['xls', 'csv', 'xlsx'])
 
 if uploaded_file:
-    try:
-        # قراءة الملف بكل الاحتمالات
-        try: df = pd.read_excel(uploaded_file)
+    @st.cache_data
+    def load_and_clean(file):
+        try:
+            df = pd.read_csv(file, encoding='utf-8-sig')
         except:
-            uploaded_file.seek(0)
-            try: df = pd.read_csv(uploaded_file, encoding='cp1256')
-            except: 
-                uploaded_file.seek(0)
-                df = pd.read_csv(uploaded_file, encoding='utf-8-sig')
-
+            try: df = pd.read_csv(file, encoding='cp1256')
+            except: df = pd.read_excel(file)
+        
+        # تنظيف أسماء الأعمدة وحل مشكلة الرموز
         df.columns = [str(c).strip() for c in df.columns]
-
+        branch = df['الفرع'].dropna().iloc[0] if 'الفرع' in df.columns else "فرع زغلولة"
+        
+        # مصفاة تنظيف الأرقام من علامات × و *
         def clean_val(x):
             if pd.isna(x): return 0
             val = re.sub(r'[^\d.]', '', str(x))
             try: return float(val)
             except: return 0
 
-        # تحديد الأعمدة
-        col_item = 'الصنف' if 'الصنف' in df.columns else df.columns[2]
-        col_qty = 'الكمية' if 'الكمية' in df.columns else df.columns[3]
-        col_price = 'السعر' if 'السعر' in df.columns else df.columns[4]
-        col_cost = 'س شراء' if 'س شراء' in df.columns else (df.columns[5] if len(df.columns) > 5 else None)
-        col_stock = 'الكمية المتبقية' if 'الكمية المتبقية' in df.columns else None
-
-        df['الصنف'] = df[col_item].astype(str)
-        df['Qty'] = df[col_qty].apply(clean_val)
-        df['Price'] = df[col_price].apply(clean_val)
-        df['Cost'] = df[col_cost].apply(clean_val) if col_cost else df['Price'] * 0.7
-        df['Stock'] = df[col_stock].apply(clean_val) if col_stock else 10 # افتراض لو مش موجود
-
-        df['Total_Sales'] = df['Qty'] * df['Price']
-        df['Net_Profit'] = (df['Price'] - df['Cost']) * df['Qty']
-
-        df_final = df[df['Total_Sales'] > 0].copy()
-        df_final = df_final[~df_final['الصنف'].str.contains('اجمالى|وارد|فاتورة', na=False)]
-
-        # عرض الكروت
-        ts, tp = df_final['Total_Sales'].sum(), df_final['Net_Profit'].sum()
-        c1, c2, c3 = st.columns(3)
-        with c1: st.markdown(f'<div class="metric-card"><h2>💰 مبيعات اليوم</h2><h1>{ts:,.0f} ج.م</h1></div>', unsafe_allow_html=True)
-        with c2: st.markdown(f'<div class="metric-card"><h2>📈 صافي الربح</h2><h1 style="color:#2980b9">{tp:,.0f} ج.م</h1></div>', unsafe_allow_html=True)
-        with c3:
-            low_stock_count = len(df_final[df_final['Stock'] <= 5])
-            st.markdown(f'<div class="metric-card"><h2>🚨 أصناف للنواقص</h2><h1 style="color:#e74c3c">{low_stock_count}</h1></div>', unsafe_allow_html=True)
-
-        st.divider()
+        # تحديد الأعمدة وحساب الربح
+        df_sales = df.dropna(subset=[df.columns[2]]).copy() # اختيار عمود الصنف بالترتيب
+        df_sales['الصنف'] = df_sales.iloc[:, 2]
+        df_sales = df_sales[~df_sales['الصنف'].astype(str).str.contains('اجمالى|وارد', na=False)]
         
-        tab1, tab2, tab3 = st.tabs(["📊 التحليل العام", "🛒 قائمة النواقص", "📝 التقارير"])
+        # تطبيق التنظيف على أعمدة الحسابات
+        for col in ['الكمية', 'السعر', 'س شراء', 'الكمية المتبقية']:
+            if col in df_sales.columns:
+                df_sales[col] = df_sales[col].apply(clean_val)
         
-        with tab1:
-            st.plotly_chart(px.bar(df_final.groupby('الصنف')['Total_Sales'].sum().nlargest(10).reset_index(), 
-                                   x='Total_Sales', y='الصنف', orientation='h', title="أكثر 10 أصناف مبيعاً"))
-        
-        with tab2:
-            st.subheader("📦 بضاعة لازم تطلبها (رصيد أقل من 5)")
-            low_stock_items = df_final[df_final['Stock'] <= 5][['الصنف', 'Stock']].drop_duplicates()
-            if not low_stock_items.empty:
-                st.dataframe(low_stock_items.rename(columns={'Stock': 'الكمية المتبقية'}), use_container_width=True)
-            else:
-                st.success("كل بضاعتك تمام، مفيش حاجة ناقصة!")
+        df_sales['Total_Sales'] = df_sales['الكمية'] * df_sales['السعر']
+        df_sales['Net_Profit'] = df_sales['Total_Sales'] - df_sales['س شراء'].fillna(0)
+        return df_sales, branch
 
-        with tab3:
-            st.download_button("📥 تحميل تقرير Word", data=create_word_report(df_final, ts, tp), file_name="Zagh_Report.docx")
+    data, branch = load_and_clean(uploaded_file)
+    t_sales = data['Total_Sales'].sum()
+    t_profit = data['Net_Profit'].sum()
+    low_stock_list = data[data['الكمية المتبقية'] <= 5]
 
-    except Exception as e:
-        st.error(f"خطأ في البيانات: {e}")
+    # --- عرض مؤشرات الأداء بشكل احترافي ---
+    st.markdown(f"""
+    <div style="display: flex; justify-content: space-between; gap: 20px; margin-bottom: 40px;">
+        <div class="metric-card" style="flex: 1;">
+            <h2>💰 مبيعات اليوم</h2>
+            <h1 style="color: #27ae60;">{t_sales:,.2f} <small style="font-size: 15px;">ج.م</small></h1>
+        </div>
+        <div class="metric-card profit" style="flex: 1;">
+            <h2>📈 صافي الأرباح</h2>
+            <h1 style="color: #2980b9;">{t_profit:,.2f} <small style="font-size: 15px;">ج.م</small></h1>
+        </div>
+        <div class="metric-card warning" style="flex: 1;">
+            <h2>🚨 أصناف للنواقص</h2>
+            <h1 style="color: #e74c3c;">{len(low_stock_list['الصنف'].unique())}</h1>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # --- نظام التبويبات الجديد ---
+    tab1, tab2, tab3 = st.tabs(["📊 التحليل البياني", "🛒 قائمة النواقص", "📝 استخراج التقارير"])
+
+    with tab1:
+        st.subheader(f"📍 ملخص الأداء: {branch}")
+        c1, c2 = st.columns(2)
+        with c1:
+            top_p = data.groupby('الصنف')['Net_Profit'].sum().nlargest(10).reset_index()
+            fig = px.bar(top_p, x='Net_Profit', y='الصنف', orientation='h', title="أعلى 10 أصناف ربحية", 
+                         color='Net_Profit', color_continuous_scale='Greens', template="simple_white")
+            st.plotly_chart(fig, use_container_width=True)
+        with c2:
+            top_q = data.groupby('الصنف')['الكمية'].sum().nlargest(10).reset_index()
+            fig_pie = px.pie(top_q, values='الكمية', names='الصنف', title="توزيع حجم المبيعات (كمية)",
+                             hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
+            st.plotly_chart(fig_pie, use_container_width=True)
+
+    with tab2:
+        st.subheader("📦 بضاعة لازم تطلبها (أقل من 5 قطع)")
+        if not low_stock_list.empty:
+            st.dataframe(low_stock_list[['الصنف', 'الكمية المتبقية']].drop_duplicates().style.background_gradient(subset=['الكمية المتبقية'], cmap='Reds'), use_container_width=True)
+        else:
+            st.success("كل بضاعتك تمام، مفيش حاجة ناقصة حالياً!")
+
+    with tab3:
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.info("اضغط على الزر أدناه لتحميل تقرير رسمي جاهز للطباعة بصيغة Word")
+        word_file = create_word_report(data, t_sales, t_profit, branch)
+        st.download_button(
+            label="📥 تحميل تقرير زغلولة (Docx)",
+            data=word_file,
+            file_name=f"تقرير_زغلولة_{datetime.now().strftime('%d_%m')}.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+
+    st.markdown("---")
+    st.markdown("<center>تطوير المهندس محمد جمال | 2026</center>", unsafe_allow_html=True)
+
 else:
-    st.info("ارفع ملف المبيعات يا هندسة عشان نظهر لك النواقص والأرباح.")
+    st.info("يا هندسة، ارفع ملف المبيعات من القائمة الجانبية عشان نبدأ التحليل.")
