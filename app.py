@@ -1,89 +1,74 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from docx import Document
-from io import BytesIO
-from datetime import datetime
 
-# إعداد الصفحة
-st.set_page_config(page_title="Zaghloula Smart Dashboard", layout="wide")
+st.set_page_config(page_title="Zaghloula - Day 1 Analysis", layout="wide")
+st.title("📊 نظام زغلولة - تحليل الداتا الشامل (Day 1)")
 
-# CSS لتنسيق الكروت
-st.markdown("""
-<style>
-.main { background-color: #f8f9fa; }
-.card { padding: 20px; border-radius: 15px; background: white; box-shadow: 0 4px 12px rgba(0,0,0,0.08); text-align: center; }
-.card h2 { color: #2c3e50; font-size: 18px; }
-.card h1 { color: #27ae60; font-size: 24px; }
-</style>
-""", unsafe_allow_html=True)
-
-def create_word_report(data, total_sales, total_profit):
-    doc = Document()
-    doc.add_heading("تقرير مبيعات زغلولة", 0)
-    doc.add_paragraph(f"إجمالي المبيعات: {total_sales:,.2f}")
-    doc.add_paragraph(f"صافي الأرباح: {total_profit:,.2f}")
-    file = BytesIO()
-    doc.save(file)
-    return file.getvalue()
-
-@st.cache_data
-def load_data(file):
-    try:
-        df = pd.read_excel(file)
-    except:
-        df = pd.read_csv(file, encoding='utf-8-sig')
-    
-    # تنظيف أسماء الأعمدة من المسافات
-    df.columns = [str(c).strip() for c in df.columns]
-    
-    # فلترة الصفوف الوهمية (مثل كلمة بيع أو إجمالي)
-    if 'صنف' in df.columns:
-        df = df.dropna(subset=['صنف'])
-        df = df[~df['صنف'].astype(str).str.contains("بيع|إجمالي|اجمالى", na=False)]
-    
-    # تحويل الأعمدة لأرقام بناءً على أسماء ملفك الحقيقية
-    cols = {'قيمة': 'قيمة', 'إجمالي ربح': 'إجمالي ربح', 'الرصيد الحالي': 'الرصيد الحالي'}
-    for c in cols.values():
-        if c in df.columns:
-            df[c] = pd.to_numeric(df[col], errors="coerce").fillna(0)
-            
-    return df
-
-with st.sidebar:
-    st.title("🛒 زغلولة")
-    uploaded_file = st.file_uploader("ارفع ملف المبيعات", type=["csv", "xls", "xlsx"])
+uploaded_file = st.sidebar.file_uploader("ارفع ملف Data Set Day 1", type=["csv", "xlsx"])
 
 if uploaded_file:
-    data = load_data(uploaded_file)
+    try:
+        # 1. قراءة الملف مع معالجة اللغة العربية
+        df = pd.read_csv(uploaded_file, encoding='utf-8-sig')
+    except:
+        df = pd.read_csv(uploaded_file, encoding='cp1256')
+
+    # 2. تنظيف الأعمدة (الملف ده أسماء أعمدته كتير جداً)
+    df.columns = [str(c).strip() for c in df.columns]
+
+    # 3. تحديد الأعمدة الأساسية بناءً على محتوى ملفك (Day 1)
+    # المبيعات غالباً في العمود رقم 3 أو 4 (حسب الملف)
+    # إحنا هندور على الأعمدة اللي فيها قيم عددية
     
-    # استخدام الأسماء الصحيحة من ملفك
-    t_sales = data['قيمة'].sum() if 'قيمة' in data.columns else 0
-    t_profit = data['إجمالي ربح'].sum() if 'إجمالي ربح' in data.columns else 0
-    low_stock = data[data['الرصيد الحالي'] < 1] if 'الرصيد الحالي' in data.columns else pd.DataFrame()
+    # تحويل كل الأعمدة الممكنة لأرقام عشان نعرف نشتغل
+    numeric_df = df.apply(pd.to_numeric, errors='coerce').fillna(0)
+    
+    # في ملف Day 1: 
+    # العمود "قيمة" هو رقم 5 والربح رقم 6 (بناءً على المعاينة)
+    sales_col = df.columns[5] # القيمة
+    profit_col = df.columns[6] # إجمالي ربح
+    name_col = df.columns[2] # الصنف
 
-    tab1, tab2, tab3 = st.tabs(["📊 Dashboard", "📦 النواقص", "📝 تقرير"])
+    # تنظيف الصفوف الوهمية
+    df = df.dropna(subset=[name_col])
+    df = df[~df[name_col].astype(str).str.contains('بيع|إجمالي|اجمالى', na=False)]
 
-    with tab1:
-        c1, c2, c3 = st.columns(3)
-        with c1: st.markdown(f'<div class="card"><h2>إجمالي المبيعات</h2><h1>{t_sales:,.2f} ج.م</h1></div>', unsafe_allow_html=True)
-        with c2: st.markdown(f'<div class="card"><h2>صافي الأرباح</h2><h1>{t_profit:,.2f} ج.م</h1></div>', unsafe_allow_html=True)
-        with c3: st.markdown(f'<div class="card"><h2>أصناف ناقصة</h2><h1>{len(low_stock)}</h1></div>', unsafe_allow_html=True)
-        
-        if 'صنف' in data.columns:
-            top_10 = data.groupby('صنف')['إجمالي ربح'].sum().sort_values(ascending=False).head(10).reset_index()
-            fig = px.bar(top_10, x='إجمالي ربح', y='صنف', orientation='h', title="أعلى 10 أصناف ربحية")
-            st.plotly_chart(fig, use_container_width=True)
+    # تحويل القيم المختارة لأرقام
+    df['Actual_Sales'] = pd.to_numeric(df[sales_col], errors='coerce').fillna(0)
+    df['Actual_Profit'] = pd.to_numeric(df[profit_col], errors='coerce').fillna(0)
 
-    with tab2:
-        st.dataframe(low_stock[['صنف', 'الرصيد الحالي']], use_container_width=True)
+    # 4. الحسابات
+    total_sales = df['Actual_Sales'].sum()
+    total_profit = df['Actual_Profit'].sum()
 
-    with tab3:
-        if st.button("تحميل تقرير Word"):
-            word_file = create_word_report(data, t_sales, t_profit)
-            st.download_button("📥 اضغط للتحميل", data=word_file, file_name="تقرير_زغلولة.docx")
+    # 5. العرض
+    st.markdown("### 📈 خلاصة داتا اليوم الأول")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.metric("💰 إجمالي المبيعات", f"{total_sales:,.2f} ج.م")
+    with c2:
+        st.metric("📈 صافي الأرباح", f"{total_profit:,.2f} ج.م")
+    with c3:
+        margin = (total_profit / total_sales * 100) if total_sales > 0 else 0
+        st.metric("🎯 هامش الربح", f"{margin:.1f}%")
 
     st.markdown("---")
-    st.markdown('<div style="text-align: center; color: gray;">تطوير المهندس محمد جمال | 01029796096</div>', unsafe_allow_html=True)
+    
+    # رسم بياني لأفضل الأصناف
+    col_left, col_right = st.columns(2)
+    with col_left:
+        top_10 = df.groupby(name_col)['Actual_Profit'].sum().sort_values(ascending=False).head(10).reset_index()
+        fig = px.bar(top_10, x='Actual_Profit', y=name_col, orientation='h', 
+                     title="أعلى 10 أصناف ربحية", color='Actual_Profit', color_continuous_scale='Reds')
+        st.plotly_chart(fig, use_container_width=True)
+        
+    with col_right:
+        st.write("### 📋 عينة البيانات المحللة")
+        st.dataframe(df[[name_col, 'Actual_Sales', 'Actual_Profit']].head(10))
+
+    st.markdown("---")
+    st.markdown("<center>تطوير المهندس محمد جمال | 2026</center>", unsafe_allow_html=True)
+
 else:
-    st.info("ارفع ملف مبيعات السبت يا هندسة")
+    st.warning("يا هندسة، ارفع ملف (Data Set Day 1) اللي معاك دلوقتي عشان ننجز!")
