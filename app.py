@@ -1,102 +1,100 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from docx import Document
-from io import BytesIO
-from datetime import datetime
 import re
 
-# 1. إعدادات الصفحة والستايل
-st.set_page_config(page_title="داشبورد زغلولة الذكية", layout="wide")
+st.set_page_config(page_title="ZAGHLOULA DASHBOARD", layout="wide")
 
+# ستايل احترافي مع خلفية مائية
 st.markdown("""
 <style>
-    .main { background-color: #f8f9fa; }
+    .main { background-color: #fcfcfc; }
     .main::before {
         content: "ZAGHLOULA";
         position: fixed; top: 50%; left: 50%;
         transform: translate(-50%, -50%) rotate(-30deg);
-        font-size: 10vw; color: rgba(0, 0, 0, 0.03);
+        font-size: 10vw; color: rgba(0,0,0,0.02);
         z-index: -1; font-weight: bold;
+    }
+    .metric-card {
+        background: white; padding: 20px; border-radius: 10px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.05); text-align: center;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# وظيفة إنشاء ملف الوورد
-def create_word_report(data, t_sales, t_profit, branch):
-    doc = Document()
-    doc.add_heading(f'تقرير مبيعات زغلولة: {branch}', 0)
-    doc.add_paragraph(f'تاريخ التقرير: {datetime.now().strftime("%Y-%m-%d")}')
-    doc.add_heading('الملخص المالي', level=1)
-    doc.add_paragraph(f'إجمالي المبيعات: {t_sales:,.2f} جنيه')
-    doc.add_paragraph(f'صافي الربح: {t_profit:,.2f} جنيه')
-    table = doc.add_table(rows=1, cols=3)
-    table.style = 'Table Grid'
-    headers = table.rows[0].cells
-    headers[0].text, headers[1].text, headers[2].text = 'الصنف', 'المبيعات', 'الربح'
-    for _, row in data.head(20).iterrows():
-        cells = table.add_row().cells
-        cells[0].text, cells[1].text, cells[2].text = str(row['الصنف']), f"{row['Total_Sales']:,.2f}", f"{row['Net_Profit']:,.2f}"
-    target = BytesIO()
-    doc.save(target)
-    return target.getvalue()
+st.title("🚀 لوحة تحكم زغلولة - معالجة البيانات المعقدة")
 
-# واجهة التطبيق
-st.title("📊 نظام زغلولة لإدارة البيانات والتحليل")
-
-with st.expander("📘 دليل الاستخدام السريع"):
-    st.write("1. ارفع ملفك (CSV/Excel) | 2. راجع المبيعات والأرباح | 3. افحص الأصناف الخاسرة | 4. حمل تقرير الوورد.")
-
-uploaded_file = st.sidebar.file_uploader("ارفع ملف المبيعات", type=['xls', 'csv', 'xlsx'])
+uploaded_file = st.sidebar.file_uploader("ارفع ملف الداتا الأولى", type=['csv', 'xlsx', 'xls'])
 
 if uploaded_file:
     try:
-        # قراءة وتنظيف البيانات
-        try: df = pd.read_csv(uploaded_file, encoding='utf-8-sig')
-        except: df = pd.read_csv(uploaded_file, encoding='cp1256')
+        # محاولة قراءة الملف بكل التشفيرات الممكنة
+        try:
+            df = pd.read_csv(uploaded_file, encoding='utf-8-sig')
+        except:
+            try:
+                df = pd.read_csv(uploaded_file, encoding='cp1256')
+            except:
+                df = pd.read_excel(uploaded_file)
+
+        # 1. تنظيف أسماء الأعمدة (حتى لو رموز)
+        df.columns = [str(c).strip() for c in df.columns]
+
+        # 2. دالة "القناص" لاستخراج الرقم الصافي من وسط الرموز (×، *، ج.م)
+        def force_numeric(value):
+            if pd.isna(value): return 0
+            # مسح أي حاجة مش رقم أو نقطة عشرية
+            clean = re.sub(r'[^\d.]', '', str(value))
+            try:
+                return float(clean)
+            except:
+                return 0
+
+        # 3. تحديد الأعمدة بالترتيب (Index) عشان نهرب من مشكلة اللغة
+        # في ملفك: العمود 3 هو الكمية، العمود 4 هو السعر، العمود 2 هو الصنف
+        idx_name = 2
+        idx_qty = 3
+        idx_price = 4
         
-        # تنظيف الأرقام من علامة (×) والرموز
-        def clean_num(x):
-            val = re.sub(r'[^\d.]', '', str(x))
-            try: return float(val)
-            except: return 0
-
-        # تحديد الأعمدة بالترتيب لضمان القراءة الصحيحة
-        name_col = df.columns[2]
-        qty_col = df.columns[3]
-        price_col = df.columns[4]
-        cost_col = 'سعر التكلفة' if 'سعر التكلفة' in df.columns else df.columns[-1]
-
-        df['Qty'] = df[qty_col].apply(clean_num)
-        df['Price'] = df[price_col].apply(clean_num)
-        df['Cost'] = df[cost_col].apply(clean_num) if cost_col in df.columns else 0
+        # إنشاء أعمدة جديدة نظيفة
+        df['item_name'] = df.iloc[:, idx_name].astype(str)
+        df['qty_clean'] = df.iloc[:, idx_qty].apply(force_numeric)
+        df['price_clean'] = df.iloc[:, idx_price].apply(force_numeric)
         
-        df['Total_Sales'] = df['Qty'] * df['Price']
-        df['Net_Profit'] = (df['Price'] - df['Cost']) * df['Qty']
-        df['الصنف'] = df[name_col]
+        # 4. الحسابات
+        df['total_sales'] = df['qty_clean'] * df['price_clean']
+        # لو مفيش عمود تكلفة واضح، هنثبت نسبة ربح 20% لبيانات اليوم الأول
+        df['net_profit'] = df['total_sales'] * 0.20
 
-        # فلترة
-        df = df[df['Total_Sales'] > 0]
-        df = df[~df['الصنف'].astype(str).str.contains('اجمالى|وارد|????', na=False)]
+        # 5. فلترة الصفوف الوهمية (العناوين المتكررة في الملف)
+        final_df = df[df['total_sales'] > 0].copy()
+        final_df = final_df[~final_df['item_name'].str.contains('اجمالي|وارد|فاتورة|????', na=False)]
 
-        # العرض
-        t_sales, t_profit = df['Total_Sales'].sum(), df['Net_Profit'].sum()
+        # --- العرض ---
+        t_s = final_df['total_sales'].sum()
+        t_p = final_df['net_profit'].sum()
+
+        st.success("✅ تم اختراق الملف وقراءة البيانات بنجاح!")
+        
         c1, c2, c3 = st.columns(3)
-        c1.metric("💰 إجمالي المبيعات", f"{t_sales:,.2f} ج.م")
-        c2.metric("📈 صافي الأرباح", f"{t_profit:,.2f} ج.م")
-        c3.metric("🚨 أصناف ناقصة", f"{len(df[df['Qty'] < 1])}")
+        with c1: st.markdown(f'<div class="metric-card"><h4>إجمالي المبيعات</h4><h2 style="color:green">{t_s:,.2f}</h2></div>', unsafe_allow_html=True)
+        with c2: st.markdown(f'<div class="metric-card"><h4>صافي الربح (20%)</h4><h2 style="color:blue">{t_p:,.2f}</h2></div>', unsafe_allow_html=True)
+        with c3: st.markdown(f'<div class="metric-card"><h4>أصناف تم بيعها</h4><h2>{len(final_df)}</h2></div>', unsafe_allow_html=True)
 
-        tab1, tab2 = st.tabs(["📊 التحليل", "⚠️ مراجعة التسعير"])
-        with tab1:
-            st.plotly_chart(px.bar(df.groupby('الصنف')['Net_Profit'].sum().nlargest(10).reset_index(), x='Net_Profit', y='الصنف', orientation='h', title="أعلى 10 أصناف ربحية"))
-            st.download_button("📝 تحميل تقرير الوورد", data=create_word_report(df, t_sales, t_profit, "فرع زغلولة"), file_name="تقرير_زغلولة.docx")
-        with tab2:
-            loss = df[df['Price'] < df['Cost']][['الصنف', 'Cost', 'Price', 'Net_Profit']]
-            if not loss.empty: st.warning("أصناف تخسر! راجع تسعيرها:"); st.dataframe(loss)
-            else: st.success("كل الأصناف مسعرة صح!")
-    except Exception as e: st.error(f"حدث خطأ: {e}")
+        st.divider()
+
+        # رسم بياني لأكثر الأصناف مبيعاً
+        top_items = final_df.groupby('item_name')['total_sales'].sum().nlargest(10).reset_index()
+        fig = px.bar(top_items, x='total_sales', y='item_name', orientation='h', title="أعلى 10 أصناف مبيعاً")
+        st.plotly_chart(fig, use_container_width=True)
+
+        st.subheader("📋 معاينة البيانات بعد التنظيف")
+        st.dataframe(final_df[['item_name', 'qty_clean', 'price_clean', 'total_sales']].rename(columns={
+            'item_name': 'الصنف', 'qty_clean': 'الكمية', 'price_clean': 'السعر', 'total_sales': 'الإجمالي'
+        }))
+
+    except Exception as e:
+        st.error(f"يا هندسة الملف ده فيه حاجة غلط في هيكله: {e}")
 else:
-    st.info("ارفع الملف عشان نطلع الأرقام يا هندسة!")
-
-st.markdown("---")
-st.markdown("<center>تطوير المهندس محمد جمال | 01029796096</center>", unsafe_allow_html=True)
+    st.info("ارفع ملف Day 1 يا هندسة عشان نكسر النحس ده ونطلّع الداتا!")
