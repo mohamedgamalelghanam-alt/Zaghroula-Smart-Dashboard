@@ -118,7 +118,6 @@ if uploaded_file:
         with tab2:
             st.subheader("🛒 قائمة بضاعة النواقص (رصيد أقل من 5)")
             if not low_stock.empty:
-                # عرض الجدول بخلفية واضحة وكلام أبيض صريح
                 st.dataframe(low_stock[['الصنف', 'Stock']].drop_duplicates().rename(columns={'Stock': 'الكمية المتبقية'}), use_container_width=True)
             else:
                 st.success("المخزن مكتمل، مفيش أي نواقص!")
@@ -133,5 +132,6 @@ if uploaded_file:
 else:
     st.info("يا هندسة ارفع ملف المبيعات من القائمة الجانبية عشان نعرض لك الأرباح!")
 
+# التذييل (Footer) المعدل برقم التليفون
 st.markdown("---")
-st.markdown("<center>تطوير المهندس محمد جمال | 2026</center>", unsafe_allow_html=True)
+st.markdown("<center>تطوير المهندس محمد جمال | 01029796096</center>", unsafe_allow_html=True)
